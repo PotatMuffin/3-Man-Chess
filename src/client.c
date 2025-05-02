@@ -163,7 +163,6 @@ void HandleInput(Board *board, int sockFd)
             if(board->map[closestSquare] == NONE) return;
             selectedSquare = closestSquare;
 
-            moveList.count = 0;
             GenerateMoves(board, &moveList);
             HighlightSquares(selectedSquare, &moveList);
         }

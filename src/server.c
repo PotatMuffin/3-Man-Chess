@@ -16,6 +16,8 @@ double GetTime();
 #define PLAYERS 3
 struct pollfd polls[PLAYERS+1];
 
+MoveList legalMoves = {0};
+
 void Broadcast(Server *server, Message *msg)
 {
     for(int i = 0; i < server->players; i++)
@@ -34,20 +36,25 @@ void Send(Server *server, int client, Message *msg)
     int _ = write(fd, msg, sizeof(Message));
 }
 
-void HandleMessage(Server *server, int client, Message *msg, MoveList *legalMoves)
+void HandleMessage(Server *server, int client, Message *msg)
 {
     Message response = {0};
-    int colour = (client+1)*8;
+    int colour = server->colour[client];
 
     if(msg->flag == PLAYMOVE)
     {
-        if(colour != server->board.colourToMove) return;
+        if(colour != server->board.colourToMove) 
+        {
+            printf("someone whose turn it isn't tried to play a move\n");
+            printf("colour of player: %d, colour to move: %d, client: %d\n", colour, server->board.colourToMove, client);
+            return;
+        }
 
         Move playedMove = msg->playMove.move;
         bool isLegal = false;
-        for(int i = 0; i < legalMoves->count; i++)
+        for(int i = 0; i < legalMoves.count; i++)
         {
-            Move move = legalMoves->moves[i];
+            Move move = legalMoves.moves[i];
             if(playedMove.start  != move.start)  continue;
             if(playedMove.target != move.target) continue;
             if(playedMove.flag   != move.flag)   continue;
@@ -156,35 +163,45 @@ void StartGame(Server *server, char *FEN)
 
     for(int i = 0; i < 3; i++)
     {
-        msg.gameStart.colour = (i+1)*8;
+        int colour = (i+1)*8;
+        msg.gameStart.colour = colour;
+        server->colour[i] = colour;
         Send(server, i, &msg);
     }
 
     InitBoard(&server->board, FEN);
 
+    GenerateMoves(&server->board, &legalMoves);
+    uint8_t movingColour = server->board.colourToMove;
     while(true)
     {
         double start = GetTime();
-        MoveList legalMoves = {0};
-        GenerateMoves(&server->board, &legalMoves);
 
-        if(legalMoves.count == 0)
+        if(movingColour != server->board.colourToMove)
         {
-            if(server->board.eliminatedColour == 0) 
+            GenerateMoves(&server->board, &legalMoves);
+            if(legalMoves.count == 0)
             {
-                EliminateColour(&server->board, server->board.colourToMove);
-                msg.eliminated.colour = server->board.colourToMove;
-                msg.flag = ELIMINATED;
-                Broadcast(server, &msg);
-                NextMove(&server->board);
+                printf("server->board.eliminatedColour = %d\n", server->board.eliminatedColour);
+                if(server->board.eliminatedColour == 0) 
+                {
+                    EliminateColour(&server->board, server->board.colourToMove);
+                    msg.eliminated.colour = server->board.colourToMove;
+                    msg.flag = ELIMINATED;
+                    Broadcast(server, &msg);
+                    NextMove(&server->board);
+                    GenerateMoves(&server->board, &legalMoves);
+                }
+                else if(InCheck()) return;
             }
-            else if(InCheck()) return;
+            movingColour = server->board.colourToMove;
         }
 
         int res = poll(polls, PLAYERS+1, 0);
 
-        for(int i = 1; res > 0 && i <= PLAYERS; i++)
+        for(int i = 1; res > 0 && i <= server->players; i++)
         {
+            int client = i-1;
             Message msg = {0};
             if((polls[i].revents & POLLIN) == 0) continue;
             int fd = polls[i].fd;
@@ -192,17 +209,23 @@ void StartGame(Server *server, char *FEN)
             int rc = read(fd, &msg, sizeof(msg));
             if(rc <= 0) 
             {
-                close(server->clientFd[i]);
-                server->clientFd[i] = -1;
-                uint8_t colour = (i+1)*8;
+                printf("client with fd %d disconnected\n", fd);
+                close(server->clientFd[client]);
+
+                uint8_t colour = server->colour[client];
                 EliminateColour(&server->board, colour);
                 msg.eliminated.colour = colour;
                 msg.flag = ELIMINATED;
                 Broadcast(server, &msg);
+
+                server->players--;
+                server->clientFd[client] = server->clientFd[server->players];
+                polls[i].fd              = server->clientFd[server->players];
+                server->colour[client]   = server->colour[server->players];
                 if(server->board.colourToMove == colour) NextMove(&server->board);
                 continue;
             }
-            HandleMessage(server, i, &msg, &legalMoves);
+            HandleMessage(server, client, &msg);
         }
 
         double end = GetTime();
@@ -221,6 +244,7 @@ void CloseServer(Server *server)
     close(server->serverFd);
 }
 
+// the functions Wait and GetTime were "inspired" by raylib
 void Wait(double t)
 {
     if(t <= 0) return;
@@ -241,7 +265,7 @@ double GetTime()
 
 int main()
 {
-    target = 1.0/20.0;
+    target = 1.0/60.0;
     Server server = {0};
     if(InitServer(&server) != 0) return 1;
     if(AwaitPlayers(&server) != 0) return 1;

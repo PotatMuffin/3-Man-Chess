@@ -221,6 +221,7 @@ bool InCheck() { return checks > 0; }
 
 void GenerateMoves(Board *board, MoveList *moveList)
 {
+    moveList->count = 0;
     if(!dataGenerated) GenerateMoveData();
     for(int i = 0; i < 144; i++) 
     {
@@ -404,6 +405,7 @@ void GenerateRookMoves(Board *board, MoveList *moveList, PieceList *pieceList)
         int square = pieceList->pieces[pieceIndex];
         for(int dir = 0; dir < 4; dir++)
         {
+            bool crossesBridgedMoat = false;
             if(pinMap[square] && !MovingAlongRay(square, dir)) continue;
 
             for(int i = 0; i < 24; i++)
@@ -416,9 +418,15 @@ void GenerateRookMoves(Board *board, MoveList *moveList, PieceList *pieceList)
                 if(CrossesMoat(move, dir, i))
                 {
                     if(!CanCrossMoat(board, move, dir, i)) break;
-                    if(board->map[move.target] != NONE) break;
+                    crossesBridgedMoat = true;
+                }   
+
+                if(crossesBridgedMoat)
+                {
+                    if(piece != NONE) break;
                     if(ChecksEnemy(board, move)) continue;
                 }
+
                 if(!blocksCheck(move)) continue;
 
                 AddMove(moveList, move);
@@ -435,6 +443,7 @@ void GenerateBishopMoves(Board *board, MoveList *moveList, PieceList *pieceList)
         int square = pieceList->pieces[pieceIndex];
         for(int dir = 4; dir < 8; dir++)
         {
+            bool crossesBridgedMoat = false;
             if(pinMap[square] && !MovingAlongRay(square, dir)) continue;
             for(int i = 0; i < 24; i++)
             {
@@ -446,9 +455,15 @@ void GenerateBishopMoves(Board *board, MoveList *moveList, PieceList *pieceList)
                 if(CrossesMoat(move, dir, i))
                 {
                     if(!CanCrossMoat(board, move, dir, i)) break;
-                    if(board->map[move.target] != NONE) break;
+                    crossesBridgedMoat = true;
+                }
+
+                if(crossesBridgedMoat)
+                {
+                    if(piece != NONE) break;
                     if(ChecksEnemy(board, move)) continue;
                 }
+
                 if(!blocksCheck(move)) continue;
 
                 AddMove(moveList, move);

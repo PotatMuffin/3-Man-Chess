@@ -103,6 +103,7 @@ typedef struct {
     Board board;
     int serverFd;
     int clientFd[3];
+    int colour[3];
     int players;
 } Server;
 

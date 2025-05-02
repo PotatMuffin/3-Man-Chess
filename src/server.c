@@ -13,10 +13,8 @@ double target = 0;
 void Wait(double t);
 double GetTime();
 
-#define EPIC_FEN    "B 8/8/8/8/BqBqBqBqBqBqBqBq/BqBqBqBkBqBqBqBq\n" \
-                    "G 8/8/8/8/GqGqGqGqGqGqGqGq/GqGqGqGkGqGqGqGq\n" \
-                    "W 8/8/8/8/WqWqWqWqWqWqWqWq/WqWqWqWkWqWqWqWq\n" \
-                    "w WkWqGkGqBkBq - - -"
+#define PLAYERS 3
+struct pollfd polls[PLAYERS+1];
 
 void Broadcast(Server *server, Message *msg)
 {
@@ -99,8 +97,9 @@ int InitServer(Server *server)
 
 int AwaitPlayers(Server *server)
 {
-    struct pollfd fd = { .fd = server->serverFd, .events = POLLIN | POLLPRI };
-    if(listen(server->serverFd, 1) < 0) 
+    Message msg = {0};
+    polls[0] = (struct pollfd) { .fd = server->serverFd, .events = POLLIN | POLLPRI };
+    if(listen(server->serverFd, 3) < 0) 
     {
         printf("failed to listen\n");
         return 1;
@@ -108,22 +107,43 @@ int AwaitPlayers(Server *server)
 
     while(server->players != 3)
     {
-        int res = poll(&fd, 1, -1);
+        int res = poll(&polls[0], PLAYERS+1, -1);
         if(res <= 0) continue;
 
-        struct sockaddr client = {0};
-        int clientSize = 0;
-
-        int clientFd = accept(server->serverFd, &client, &clientSize);
-        fcntl(clientFd, F_SETFL, O_NONBLOCK);
-        if(clientFd < 0) 
+        for(int i = 0; i <= server->players; i++)
         {
-            printf("couldn't accept connection\n");
-            return 1;
-        }
-        printf("client connect with fd: %d\n", clientFd);
+            if((polls[i].revents & polls[i].events) == 0) continue;
+            if(i == 0)
+            {
+                struct sockaddr client = {0};
+                int clientSize = 0;
 
-        server->clientFd[server->players++] = clientFd;
+                int clientFd = accept(server->serverFd, &client, &clientSize);
+                fcntl(clientFd, F_SETFL, O_NONBLOCK);
+                if(clientFd < 0) 
+                {
+                    printf("couldn't accept connection\n");
+                    return 1;
+                }
+                printf("client connected with fd: %d\n", clientFd);
+
+                server->clientFd[server->players++] = clientFd;
+                polls[server->players] = (struct pollfd) { .fd = clientFd, .events = POLLIN };
+            }
+            else
+            {
+                int fd = polls[i].fd;
+                int rc = read(fd, &msg, sizeof(msg));
+                if(rc <= 0)
+                {
+                    printf("client with fd %d has disconnected\n", fd);
+                    close(fd);
+                    server->players--;
+                    server->clientFd[i] = server->clientFd[server->players];
+                    polls[i].fd         = server->clientFd[server->players];
+                }
+            }
+        }
     }
     return 0;
 }
@@ -145,21 +165,6 @@ void StartGame(Server *server, char *FEN)
     while(true)
     {
         double start = GetTime();
-
-        struct pollfd polls[] = {
-            [0] = {
-                .fd = server->clientFd[0],
-                .events = POLLIN,
-            },
-            [1] = {
-                .fd = server->clientFd[1],
-                .events = POLLIN,
-            },
-            [2] = {
-                .fd = server->clientFd[2],
-                .events = POLLIN,
-            }
-        };
         MoveList legalMoves = {0};
         GenerateMoves(&server->board, &legalMoves);
 
@@ -176,9 +181,9 @@ void StartGame(Server *server, char *FEN)
             else if(InCheck()) return;
         }
 
-        int res = poll(polls, 3, -1);
+        int res = poll(polls, PLAYERS+1, 0);
 
-        for(int i = 0; res > 0 && i < 3; i++)
+        for(int i = 1; res > 0 && i <= PLAYERS; i++)
         {
             Message msg = {0};
             if((polls[i].revents & POLLIN) == 0) continue;
@@ -187,6 +192,7 @@ void StartGame(Server *server, char *FEN)
             int rc = read(fd, &msg, sizeof(msg));
             if(rc <= 0) 
             {
+                close(server->clientFd[i]);
                 server->clientFd[i] = -1;
                 uint8_t colour = (i+1)*8;
                 EliminateColour(&server->board, colour);

@@ -121,6 +121,91 @@ void NextMove(Board *board);
 void EliminateColour(Board *board, uint8_t colour);
 inline PieceList *GetPieceList(Board *board, uint8_t piece) { if(GetPieceType(piece) == PAWNCC) piece &= 0b11111110; return &board->piecelists[piece-8]; }
 
+#define mod(x, y) ((x%y+y)%y)
+inline int Up(int square, int distance)
+{
+    int rank = square / 24;
+    int file = square % 24;
+    rank += distance;
+    
+    if(rank >= 6)
+    {
+        file += 12;
+        file = mod(file, 24);
+        rank = 5 - (rank-6);
+    }
+    if(rank < 0) return -1;
+    return rank*24+file;
+}
+
+inline int Down(int square, int distance)
+{
+    return Up(square, -distance);
+}
+
+inline int Left(int square, int distance)
+{
+    int rank = square / 24;
+    int file = square % 24;
+
+    file += distance;
+    file = mod(file, 24);
+    return rank*24+file;
+}
+
+inline int Right(int square, int distance)
+{
+    return Left(square, 24-distance);
+}
+
+inline int UpLeft(int square, int distance)
+{
+    int rank = square / 24;
+    int file = square % 24;
+
+    rank += distance;
+    file += distance;
+    file = mod(file, 24);
+    if(rank >= 6)
+    {
+        file += 13;
+        file = mod(file, 24);
+        rank = 5 - (rank-6);
+    }
+
+    if(rank < 0) return -1;
+    return rank*24+file;
+}
+
+inline int UpRight(int square, int distance)
+{
+    int rank = square / 24;
+    int file = square % 24;
+
+    rank += distance;
+    file += (24 - distance);
+    file = mod(file, 24);
+    if(rank >= 6)
+    {
+        file += 11;
+        file = mod(file, 24);
+        rank = 5 - (rank-6);
+    }
+
+    if(rank < 0) return -1;
+    return rank*24+file;
+}
+
+inline int DownLeft(int square, int distance)
+{
+    return UpRight(square, -distance);
+}
+
+inline int DownRight(int square, int distance)
+{
+    return UpLeft(square, -distance);
+}
+
 void GenerateMoves(Board *board, MoveList *moveList);
 bool InCheck();
 

@@ -32,11 +32,18 @@ Message msg = {0};
 // int pieceSize;
 // int borderSize;
 
+enum {
+    WhitePerspective = 0,
+    BlackPerspective = 1,
+    GrayPerspective  = 2,
+};
+
+uint8_t perspective = WhitePerspective;
+
 int selectedSquare = -1;
 char highlightedSquares[144];
 
 MoveList moveList = {0};
-
 Vector2 SquareCenterCoords[144];
 
 void DrawBoard(Board *board, Texture2D spriteSheet);
@@ -46,7 +53,7 @@ void HighlightSquares(int square, MoveList *moveList);
 void HighlightSquare(int square);
 void ResetSquares();
 int JoinGame(char *ip, short port);
-void HandleServerMessage(int sockFd, Board *board);
+int HandleServerMessage(int sockFd, Board *board);
 void Send(int fd, Message *msg);
 
 int main()
@@ -88,7 +95,12 @@ int main()
         BeginTextureMode(target);
         if(GameInProgress)
         {
-            HandleServerMessage(sockFd, &board);
+            int res = HandleServerMessage(sockFd, &board);
+            if(res != 0) 
+            {
+                GameInProgress = false;
+                sockFd = -1;
+            }
             HandleInput(&board, sockFd);
         }
         else 
@@ -157,6 +169,9 @@ void HandleInput(Board *board, int sockFd)
                 closestSquare = square;
             }
         }
+
+        if(perspective == BlackPerspective)     closestSquare = Left(closestSquare, 8);
+        else if(perspective == GrayPerspective) closestSquare = Right(closestSquare, 8);
 
         if (selectedSquare == -1)
         {
@@ -251,6 +266,8 @@ void DrawBoard(Board *board, Texture2D spriteSheet)
         for(int j = 0; j < 24; j++)
         {
             int index = i*24+j;
+            if(perspective == BlackPerspective)     index = Left(index, 8);
+            else if(perspective == GrayPerspective) index = Right(index, 8);
             Color colour = {0};
             if((i+j)%2)
             {
@@ -323,9 +340,14 @@ void DrawBoard(Board *board, Texture2D spriteSheet)
             }
 
             int rank = square / 24;
+            int file = square % 24;
             float size = pieceSize - (20*(float)rank/5);
 
-            Vector2 position =  SquareCenterCoords[square];
+            int index = square;
+            if(perspective == BlackPerspective)     index = Right(index, 8);
+            else if(perspective == GrayPerspective) index = Left(index, 8);
+
+            Vector2 position =  SquareCenterCoords[index];
             DrawTexturePro(spriteSheet, pieceSprite, 
                 (Rectangle){position.x, position.y, size, size}, 
                 (Vector2){size/2, size/2}, 0, GetColor(0xFFFFFFFF));
@@ -364,7 +386,7 @@ int JoinGame(char *ip, short port)
     return fd;
 }
 
-void HandleServerMessage(int sockFd, Board *board)
+int HandleServerMessage(int sockFd, Board *board)
 {
     struct pollfd pollFd = {
         .fd = sockFd,
@@ -373,17 +395,18 @@ void HandleServerMessage(int sockFd, Board *board)
 
     poll(&pollFd, 1, 0);
 
-    if((pollFd.revents & POLLIN) == 0) return;
+    if((pollFd.revents & POLLIN) == 0) return 0;
     int rc = read(sockFd, &msg, sizeof(msg));
     if(rc == 0) 
     {
         close(sockFd);
-        return;
+        return 1;
     }
 
     if(msg.flag == GAMESTART)
     {
         printf("Starting game with fen:\n%s\nand colour: %d\n", msg.gameStart.FEN, msg.gameStart.colour);
+        perspective = (msg.gameStart.colour >> 3) - 1;
         InitBoard(board, msg.gameStart.FEN);
     }
     else if(msg.flag == PLAYMOVE)
@@ -398,7 +421,7 @@ void HandleServerMessage(int sockFd, Board *board)
         EliminateColour(board, colour);
         if(board->colourToMove == colour) NextMove(board);
     }
-    return;
+    return 0;
 }
 
 void Send(int fd, Message *msg)

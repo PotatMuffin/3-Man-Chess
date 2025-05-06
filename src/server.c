@@ -36,6 +36,18 @@ void Send(Server *server, int client, Message *msg)
     int _ = write(fd, msg, sizeof(Message));
 }
 
+void EliminatePlayer(Server *server, uint8_t colour)
+{
+    Message msg = {0};
+    EliminateColour(&server->board, colour);
+    int index = (colour>>3)-1;
+    msg.eliminated.colour = colour;
+    msg.eliminated.clockTime = server->board.clock.seconds[index];
+    msg.flag = ELIMINATED;
+    Broadcast(server, &msg);
+    if(server->board.colourToMove == colour) NextMove(&server->board);
+}
+
 void HandleMessage(Server *server, int client, Message *msg)
 {
     Message response = {0};
@@ -65,13 +77,13 @@ void HandleMessage(Server *server, int client, Message *msg)
 
         if(isLegal)
         {
+            IncrementClock(&server->board);
             MakeMove(&server->board, playedMove);
+            response.flag = MOVEPLAYED;
+            response.movePlayed.move = playedMove;
+            response.movePlayed.clockTime = server->board.clock.seconds[index];
+            Broadcast(server, &response);
         }
-
-        response.flag = MOVEPLAYED;
-        response.movePlayed.move = playedMove;
-        response.movePlayed.clockTime = server->clock.seconds[index];
-        Broadcast(server, &response);
     }
 }
 
@@ -90,7 +102,7 @@ int InitServer(Server *server)
     memset(&addr, 0, sizeof addr);
 
     addr.sin_family = AF_INET;
-    addr.sin_port = htons(42069);
+    addr.sin_port = htons(PORT);
     addr.sin_addr.s_addr = htonl(INADDR_ANY);
 
     int yes = 1;
@@ -148,8 +160,8 @@ int AwaitPlayers(Server *server)
                     printf("client with fd %d has disconnected\n", fd);
                     close(fd);
                     server->players--;
-                    server->clientFd[i] = server->clientFd[server->players];
-                    polls[i].fd         = server->clientFd[server->players];
+                    server->clientFd[i-1] = server->clientFd[server->players];
+                    polls[i].fd           = server->clientFd[server->players];
                 }
             }
         }
@@ -159,8 +171,10 @@ int AwaitPlayers(Server *server)
 
 void StartGame(Server *server, char *FEN)
 {
+    TimeControl TimeControl = { .minutes = 10, .increment = 10 };
     Message msg = {0};
     msg.gameStart.flag = GAMESTART;
+    msg.gameStart.TimeControl = TimeControl;
     strcpy(msg.gameStart.FEN, FEN);
 
     for(int i = 0; i < 3; i++)
@@ -172,11 +186,7 @@ void StartGame(Server *server, char *FEN)
     }
 
     InitBoard(&server->board, FEN);
-
-    for(int i = 0; i < 3; i++)
-    {
-        server->clock.seconds[i] = 600;
-    }
+    InitClock(&server->board, TimeControl);
 
     GenerateMoves(&server->board, &legalMoves);
     uint8_t movingColour = server->board.colourToMove;
@@ -189,9 +199,6 @@ void StartGame(Server *server, char *FEN)
         if(deltaTime < 0 || prevFrameStart == 0) deltaTime = 0;
         prevFrameStart = start;
 
-        int index = (server->board.colourToMove >> 3)-1;
-        server->clock.seconds[index] -= deltaTime;
-
         if(movingColour != server->board.colourToMove)
         {
             GenerateMoves(&server->board, &legalMoves);
@@ -200,17 +207,16 @@ void StartGame(Server *server, char *FEN)
                 printf("server->board.eliminatedColour = %d\n", server->board.eliminatedColour);
                 if(server->board.eliminatedColour == 0) 
                 {
-                    EliminateColour(&server->board, server->board.colourToMove);
-                    msg.eliminated.colour = server->board.colourToMove;
-                    msg.flag = ELIMINATED;
-                    Broadcast(server, &msg);
-                    NextMove(&server->board);
+                    EliminatePlayer(server, server->board.colourToMove);
                     GenerateMoves(&server->board, &legalMoves);
                 }
                 else if(InCheck()) return;
             }
             movingColour = server->board.colourToMove;
         }
+
+        UpdateClock(&server->board, deltaTime);
+        if(FlaggedClock(&server->board)) EliminatePlayer(server, server->board.colourToMove);
 
         int res = poll(polls, PLAYERS+1, 0);
 
@@ -228,16 +234,12 @@ void StartGame(Server *server, char *FEN)
                 close(server->clientFd[client]);
 
                 uint8_t colour = server->colour[client];
-                EliminateColour(&server->board, colour);
-                msg.eliminated.colour = colour;
-                msg.flag = ELIMINATED;
-                Broadcast(server, &msg);
+                EliminatePlayer(server, colour);
 
                 server->players--;
                 server->clientFd[client] = server->clientFd[server->players];
                 polls[i].fd              = server->clientFd[server->players];
                 server->colour[client]   = server->colour[server->players];
-                if(server->board.colourToMove == colour) NextMove(&server->board);
                 continue;
             }
             HandleMessage(server, client, &msg);

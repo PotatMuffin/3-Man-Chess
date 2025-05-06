@@ -4,6 +4,8 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#define PORT 42069
+
 #define DEFAULT_FEN "B 8/8/8/8/BpBpBpBpBpBpBpBp/BrBnBbBkBqBbBnBr\n" \
                     "G 8/8/8/8/GpGpGpGpGpGpGpGp/GrGnGbGkGqGbGnGr\n" \
                     "W 8/8/8/8/WpWpWpWpWpWpWpWp/WrWnWbWkWqWbWnWr\n" \
@@ -36,6 +38,16 @@ typedef struct {
 } CastleRights;
 
 typedef struct {
+    double seconds[3];
+    int increment;
+} Clock;
+
+typedef struct {
+    int minutes;
+    int increment;
+} TimeControl;
+
+typedef struct {
     uint8_t map[144];
     PieceList piecelists[24];
     CastleRights castleRights[3];
@@ -43,11 +55,8 @@ typedef struct {
     bool bridgedMoats[3];
     uint8_t colourToMove;
     uint8_t eliminatedColour;
+    Clock clock;
 } Board;
-
-typedef struct {
-    double seconds[3];
-} Clock;
 
 typedef struct {
     uint8_t start;
@@ -78,7 +87,8 @@ enum MessageFlag {
 struct GameStart {
     uint16_t flag;
     uint8_t  colour;
-    char FEN[2048];
+    TimeControl TimeControl;
+    char FEN[256];
 };
 
 struct PlayMove {
@@ -95,6 +105,7 @@ struct MovePlayed {
 struct Eliminated {
     uint16_t flag;
     uint8_t  colour;
+    double clockTime;
 };
 
 typedef union {
@@ -113,7 +124,6 @@ typedef struct {
 
 typedef struct {
     Board board;
-    Clock clock;
     int serverFd;
     int clientFd[3];
     int colour[3];
@@ -132,6 +142,35 @@ int LoadFen(Board *board, char *FEN);
 void MakeMove(Board *board, Move move);
 void NextMove(Board *board);
 void EliminateColour(Board *board, uint8_t colour);
+
+inline void SetClock(Board *board, uint8_t colour, double time)
+{
+    int index = (colour>>3)-1;
+    board->clock.seconds[index] = time;
+}
+inline void InitClock(Board *board, TimeControl control)
+{
+    for(int i = 0; i < 3; i++) board->clock.seconds[i] = control.minutes * 60;
+    board->clock.increment = control.increment;
+}
+inline void UpdateClock(Board *board, double deltaTime)
+{
+    int index = (board->colourToMove>>3)-1;
+    board->clock.seconds[index] -= deltaTime;
+}
+
+inline void IncrementClock(Board *board)
+{
+    int index = (board->colourToMove>>3)-1;
+    board->clock.seconds[index] += board->clock.increment;
+}
+
+inline bool FlaggedClock(Board *board)
+{
+    int index = (board->colourToMove>>3)-1;
+    return board->clock.seconds[index] <= 0.0f;
+}
+
 inline PieceList *GetPieceList(Board *board, uint8_t piece) { if(GetPieceType(piece) == PAWNCC) piece &= 0b11111110; return &board->piecelists[piece-8]; }
 
 #define mod(x, y) ((x%y+y)%y)

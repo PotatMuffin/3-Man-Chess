@@ -19,18 +19,11 @@ const int pieceSize = 60;
 const int centerSize = 100;
 const int borderSize = rankSize/3;
 const int boardRadius = centerSize+rankSize*6;
-float scale = 0;
+float scaleX = 0;
+float scaleY = 0;
 
 struct sockaddr_in serverAddr;
 Message msg = {0};
-
-// const float rankScreenRatio = 0.055555556f;
-// const float centerScreenRatio = 0.092592593f;
-// int boardRadius;
-// int rankSize;
-// int centerSize;
-// int pieceSize;
-// int borderSize;
 
 enum {
     WhitePerspective = 0,
@@ -52,6 +45,7 @@ void HandleInput(Board *board, int sockFd);
 void HighlightSquares(int square, MoveList *moveList);
 void HighlightSquare(int square);
 void ResetSquares();
+void DrawClock(Board *board);
 int JoinGame(char *ip, short port);
 int PollConnection(int fd);
 int HandleServerMessage(int sockFd, Board *board);
@@ -72,13 +66,8 @@ int main()
     int width = GetScreenWidth();
     int height = GetScreenHeight();
     RenderTexture2D target = LoadRenderTexture(WIDTH, HEIGHT);
-    scale = fminf((float)GetScreenWidth()/WIDTH, (float)GetScreenHeight()/HEIGHT);
-
-    // rankSize = rankScreenRatio*height;
-    // centerSize = centerScreenRatio*height;
-    // pieceSize = rankSize;
-    // borderSize = rankSize/3;
-    // boardRadius = centerSize+rankSize*6;
+    scaleX = (float)width/WIDTH;
+    scaleY = (float)height/HEIGHT;
 
     InitSquareCenterCoords();
     Texture2D spriteSheet = LoadTexture("./sprites/pieces.png");
@@ -90,19 +79,39 @@ int main()
     bool connectionFailed = false;
     double connectTime = 0.0f;
     int sockFd = -1;
-    // int sockFd = JoinGame("127.0.0.1", 42069);
-    // if(sockFd < 0) return 1;
 
     while(!WindowShouldClose())
     {
         BeginDrawing();
+        if(IsWindowResized())
+        {
+            width = GetScreenWidth();
+            height = GetScreenHeight();
+            scaleX = (float)width/WIDTH;
+            scaleY = (float)height/HEIGHT;
+        }
+
+        double deltaTime = GetFrameTime();
         BeginTextureMode(target);
         ClearBackground(GetColor(0x181818FF));
 
+        if(IsKeyPressed(KEY_F11))
+        {
+            if(IsWindowFullscreen()) SetWindowSize(width-100, height-100);
+            else 
+            {
+                int monitor = GetCurrentMonitor();
+                int width = GetMonitorWidth(monitor);
+                int height = GetMonitorHeight(monitor);
+                SetWindowSize(width, height);
+            }
+            ToggleFullscreen();
+        }
+
         if(GameInProgress)
         {
-            double deltaTime = GetFrameTime();
-            // clocks.seconds[0] -= deltaTime;
+            UpdateClock(&board, deltaTime);
+            DrawClock(&board);
 
             int res = HandleServerMessage(sockFd, &board);
             if(res != 0) 
@@ -111,14 +120,6 @@ int main()
                 sockFd = -1;
             }
             HandleInput(&board, sockFd);
-
-            // Color colour = GetColor(0x202020FF);
-            // Rectangle ClockBox = { .x = 50, .y = 50, .width = 300, .height = 100};
-            // DrawRectangleRec(ClockBox, colour);
-            // int minutes = (int)clocks.seconds[0]/60;
-            // int seconds = (int)clocks.seconds[0]%60;
-            // const char *clockText = TextFormat("%d:%02d", minutes, seconds);
-            // DrawText(clockText, ClockBox.x+100, ClockBox.y+15, 80, RL_WHITE);
         }
         else 
         {
@@ -134,7 +135,7 @@ int main()
                         connectionFailed = true;
                         connectTime = 0.0f;
                     }
-                    connectTime += GetFrameTime();
+                    connectTime += deltaTime;
                 }
                 else if(res == sockFd)
                 {
@@ -164,7 +165,7 @@ int main()
             {
                 if(!connecting)
                 {
-                    sockFd = JoinGame(ip, 42069);
+                    sockFd = JoinGame(ip, PORT);
                     if(sockFd > 0) connecting = true;
                 }
             }
@@ -226,8 +227,8 @@ void HandleInput(Board *board, int sockFd)
         Vector2 center = {WIDTH/2, HEIGHT/2};
 
         Vector2 mousePos = GetMousePosition();
-        mousePos.x /= scale;
-        mousePos.y /= scale;
+        mousePos.x /= scaleX;
+        mousePos.y /= scaleY;
         float mouseDistance = Vector2Distance(mousePos, center);
         if(mouseDistance > boardRadius || mouseDistance < centerSize) return;
 
@@ -428,6 +429,36 @@ void DrawBoard(Board *board, Texture2D spriteSheet)
     }
 }
 
+void DrawClock(Board *board)
+{
+    static const Rectangle clockBoxes[] = {
+        [0] = { .x = 50,   .y = 900, .width = 300, .height = 100 },
+        [1] = { .x = 50,   .y = 50,  .width = 300, .height = 100 },
+        [2] = { .x = 1550, .y = 50,  .width = 300, .height = 100 }
+    };
+
+    for(int i = 0; i < 3; i++)
+    {
+        int index = (i + perspective) % 3;
+        Color colour = GetColor(0x202020FF);
+        Rectangle ClockBox = clockBoxes[i];
+        DrawRectangleRec(ClockBox, colour);
+
+        double time = board->clock.seconds[index];
+        int minutes = (int)time/60;
+        int seconds = (int)time%60;
+
+        bool flagged = time <= 0.0f;
+        const char *clockText = (flagged) ? "0:00" : TextFormat("%d:%02d", minutes, seconds);
+
+        int textSize = MeasureText(clockText, 80);
+        int textOffset = ClockBox.width - textSize-10;
+
+        Color textColour = (flagged) ? RL_RED : RL_WHITE;
+        DrawText(clockText, ClockBox.x+textOffset, ClockBox.y+15, 80, textColour);
+    }
+}
+
 int JoinGame(char *ip, short port)
 {
     int fd = socket(AF_INET, SOCK_STREAM | O_NONBLOCK, 0);
@@ -487,10 +518,12 @@ int HandleServerMessage(int sockFd, Board *board)
         printf("Starting game with fen:\n%s\nand colour: %d\n", msg.gameStart.FEN, msg.gameStart.colour);
         perspective = (msg.gameStart.colour >> 3) - 1;
         InitBoard(board, msg.gameStart.FEN);
+        InitClock(board, msg.gameStart.TimeControl);
     }
     else if(msg.flag == MOVEPLAYED)
     {
         printf("time left on clock: %f\n", msg.movePlayed.clockTime);
+        SetClock(board, board->colourToMove, msg.movePlayed.clockTime);
         Move move = msg.playMove.move;
         ResetSquares();
         MakeMove(board, move);
@@ -498,6 +531,7 @@ int HandleServerMessage(int sockFd, Board *board)
     else if(msg.flag == ELIMINATED)
     {
         uint8_t colour = msg.eliminated.colour;
+        SetClock(board, colour, msg.eliminated.clockTime);
         EliminateColour(board, colour);
         if(board->colourToMove == colour) NextMove(board);
     }

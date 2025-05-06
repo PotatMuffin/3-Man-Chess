@@ -6,6 +6,6 @@
  - make joining games more convenient
  - server must handle clients disconnecting while awaiting players - DONE
  - eliminate player when disconnected - DONE
- - add clocks
+ - add clocks - DONE
  - port to winblows
 

@@ -40,6 +40,7 @@ void HandleMessage(Server *server, int client, Message *msg)
 {
     Message response = {0};
     int colour = server->colour[client];
+    int index = (colour >> 3)-1;
 
     if(msg->flag == PLAYMOVE)
     {
@@ -67,8 +68,9 @@ void HandleMessage(Server *server, int client, Message *msg)
             MakeMove(&server->board, playedMove);
         }
 
-        response.flag = PLAYMOVE;
-        response.playMove.move = playedMove;
+        response.flag = MOVEPLAYED;
+        response.movePlayed.move = playedMove;
+        response.movePlayed.clockTime = server->clock.seconds[index];
         Broadcast(server, &response);
     }
 }
@@ -171,11 +173,24 @@ void StartGame(Server *server, char *FEN)
 
     InitBoard(&server->board, FEN);
 
+    for(int i = 0; i < 3; i++)
+    {
+        server->clock.seconds[i] = 600;
+    }
+
     GenerateMoves(&server->board, &legalMoves);
     uint8_t movingColour = server->board.colourToMove;
+
+    double prevFrameStart = 0;
     while(true)
     {
         double start = GetTime();
+        double deltaTime = start - prevFrameStart;
+        if(deltaTime < 0 || prevFrameStart == 0) deltaTime = 0;
+        prevFrameStart = start;
+
+        int index = (server->board.colourToMove >> 3)-1;
+        server->clock.seconds[index] -= deltaTime;
 
         if(movingColour != server->board.colourToMove)
         {

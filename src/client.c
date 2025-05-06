@@ -10,7 +10,7 @@
 #include "../dep/raylib/raylib.h"
 #include "../dep/raylib/raymath.h"
 
-#define MAX_CHARS 14
+#define MAX_CHARS 16
 #define WIDTH 1920
 #define HEIGHT 1080
 
@@ -53,6 +53,7 @@ void HighlightSquares(int square, MoveList *moveList);
 void HighlightSquare(int square);
 void ResetSquares();
 int JoinGame(char *ip, short port);
+int PollConnection(int fd);
 int HandleServerMessage(int sockFd, Board *board);
 void Send(int fd, Message *msg);
 
@@ -64,7 +65,7 @@ int main()
 
     SetConfigFlags(FLAG_WINDOW_RESIZABLE | FLAG_BORDERLESS_WINDOWED_MODE);
     InitWindow(0, 0, "3 Man Chess");
-    // ToggleFullscreen();
+    ToggleFullscreen();
     SetTargetFPS(60);
     SetWindowMinSize(80, 80);
 
@@ -85,6 +86,9 @@ int main()
     char ip[MAX_CHARS+1] = "\0";
     int charCount = 0;
     bool GameInProgress = false;
+    bool connecting = false;
+    bool connectionFailed = false;
+    double connectTime = 0.0f;
     int sockFd = -1;
     // int sockFd = JoinGame("127.0.0.1", 42069);
     // if(sockFd < 0) return 1;
@@ -93,8 +97,13 @@ int main()
     {
         BeginDrawing();
         BeginTextureMode(target);
+        ClearBackground(GetColor(0x181818FF));
+
         if(GameInProgress)
         {
+            double deltaTime = GetFrameTime();
+            // clocks.seconds[0] -= deltaTime;
+
             int res = HandleServerMessage(sockFd, &board);
             if(res != 0) 
             {
@@ -102,11 +111,50 @@ int main()
                 sockFd = -1;
             }
             HandleInput(&board, sockFd);
+
+            // Color colour = GetColor(0x202020FF);
+            // Rectangle ClockBox = { .x = 50, .y = 50, .width = 300, .height = 100};
+            // DrawRectangleRec(ClockBox, colour);
+            // int minutes = (int)clocks.seconds[0]/60;
+            // int seconds = (int)clocks.seconds[0]%60;
+            // const char *clockText = TextFormat("%d:%02d", minutes, seconds);
+            // DrawText(clockText, ClockBox.x+100, ClockBox.y+15, 80, RL_WHITE);
         }
         else 
         {
-            int key = GetCharPressed();
+            if(connecting)
+            {
+                DrawText("Connecting...", 55, 115, 40, RL_MAROON);
+                int res = PollConnection(sockFd);
+                if(res == 0)
+                {
+                    if(connectTime >= 5.0f) 
+                    {
+                        connecting = false;
+                        connectionFailed = true;
+                        connectTime = 0.0f;
+                    }
+                    connectTime += GetFrameTime();
+                }
+                else if(res == sockFd)
+                {
+                    connecting = false;
+                    connectTime = 0.0f;
+                    GameInProgress = true;
+                }
+                else
+                {
+                    connecting = false;
+                    connectionFailed = true;
+                    connectTime = 0.0f;
+                }
+            }
+            else if(connectionFailed)
+            {
+                DrawText("Connection failed", 55, 115, 40, RL_MAROON);
+            }
 
+            int key = GetCharPressed();
             if(IsKeyPressed(KEY_BACKSPACE) && charCount > 0)
             {
                 charCount--;
@@ -114,12 +162,38 @@ int main()
             }
             if(IsKeyPressed(KEY_ENTER) && charCount > 0)
             {
-                sockFd = JoinGame(ip, 42069);
-                if(sockFd >= 0) GameInProgress = true; 
+                if(!connecting)
+                {
+                    sockFd = JoinGame(ip, 42069);
+                    if(sockFd > 0) connecting = true;
+                }
+            }
+            if(IsKeyDown(KEY_LEFT_CONTROL))
+            {
+                if(IsKeyPressed(KEY_V))
+                {
+                    const char *clipboard = GetClipboardText();  
+                    if(clipboard != NULL)
+                    {
+                        int len = strlen(clipboard);
+                        memcpy(ip, clipboard, MAX_CHARS);
+                        if(len > MAX_CHARS) ip[MAX_CHARS] = '\0';
+                        charCount = (len >= MAX_CHARS) ? MAX_CHARS : len;
+                    } 
+                }
+                else if(IsKeyPressed(KEY_C))
+                {
+                    SetClipboardText(ip);
+                }
+                else if(IsKeyPressed(KEY_BACKSPACE))
+                {
+                    ip[0] = '\0';
+                    charCount = 0;
+                }
             }
             while(key > 0)
             {
-                if((key >= '0' && key <= '9' || key == '.') && charCount <= MAX_CHARS)
+                if((key >= '0' && key <= '9' || key == '.') && charCount < MAX_CHARS)
                 {
                     ip[charCount++] = (char)key;
                     ip[charCount] = '\0';
@@ -128,11 +202,10 @@ int main()
             }
 
             Rectangle textBox = { .x = 50, .y = 50, .width = 300, .height = 50};
-            DrawRectangleRec(textBox, LIGHTGRAY);
+            DrawRectangleRec(textBox, RL_LIGHTGRAY);
             DrawRectangleLinesEx(textBox, 2, GetColor(0xFFFFFFFF));
-            DrawText(ip, textBox.x+5, textBox.y+8, 40, MAROON);
+            DrawText(ip, textBox.x+5, textBox.y+8, 40, RL_MAROON);
         }
-        ClearBackground(GetColor(0x181818FF));
         DrawFPS(0, 0);
         DrawBoard(&board, spriteSheet);
         EndTextureMode();
@@ -297,8 +370,8 @@ void DrawBoard(Board *board, Texture2D spriteSheet)
         Vector2 startPos    = { center.x+startRadius   *cosf(angle), center.y+startRadius   *sinf(angle)};
         Vector2 endPosMoat  = { center.x+endRadiusMoat *cosf(angle), center.y+endRadiusMoat *sinf(angle)};
         Vector2 endPosCreek = { center.x+endRadiusCreek*cosf(angle), center.y+endRadiusCreek*sinf(angle)};
-        DrawLineEx(startPos, endPosMoat, 8, BLUE);
-        DrawLineEx(startPos, endPosCreek, 4, BLUE);
+        DrawLineEx(startPos, endPosMoat, 8, RL_BLUE);
+        DrawLineEx(startPos, endPosCreek, 4, RL_BLUE);
     }
     DrawCircle(center.x, center.y, centerSize, GetColor(0x664a3eFF));
 
@@ -368,6 +441,11 @@ int JoinGame(char *ip, short port)
 
     connect(fd, (struct sockaddr *)&serverAddr, sizeof(serverAddr));
 
+    return fd;
+}
+
+int PollConnection(int fd)
+{
     struct pollfd pollFd = {
         .fd = fd,
         .events = POLLOUT
@@ -376,13 +454,14 @@ int JoinGame(char *ip, short port)
     struct sockaddr addr = {0};
     int size = sizeof(addr);
 
-    poll(&pollFd, 1, -1);
+    int res = poll(&pollFd, 1, 0);
+    if(res <= 0) return 0;
+
     if(getpeername(fd, &addr, &size) != 0)
     {
         printf("failed to connect\n");
         return -1;
     }
-
     return fd;
 }
 
@@ -409,8 +488,9 @@ int HandleServerMessage(int sockFd, Board *board)
         perspective = (msg.gameStart.colour >> 3) - 1;
         InitBoard(board, msg.gameStart.FEN);
     }
-    else if(msg.flag == PLAYMOVE)
+    else if(msg.flag == MOVEPLAYED)
     {
+        printf("time left on clock: %f\n", msg.movePlayed.clockTime);
         Move move = msg.playMove.move;
         ResetSquares();
         MakeMove(board, move);

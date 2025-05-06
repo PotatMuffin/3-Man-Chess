@@ -46,6 +46,10 @@ typedef struct {
 } Board;
 
 typedef struct {
+    double seconds[3];
+} Clock;
+
+typedef struct {
     uint8_t start;
     uint8_t target;
     uint8_t flag;
@@ -66,6 +70,7 @@ enum MoveFlag {
 enum MessageFlag {
     GAMESTART,
     PLAYMOVE,
+    MOVEPLAYED,
     ELIMINATED,
 
 };
@@ -81,6 +86,12 @@ struct PlayMove {
     Move move;
 };
 
+struct MovePlayed {
+    uint16_t flag;
+    Move move;
+    double clockTime;
+};
+
 struct Eliminated {
     uint16_t flag;
     uint8_t  colour;
@@ -90,6 +101,7 @@ typedef union {
     uint16_t flag;
     struct GameStart gameStart;
     struct PlayMove playMove;
+    struct MovePlayed movePlayed;
     struct Eliminated eliminated;
 } Message;
 
@@ -101,6 +113,7 @@ typedef struct {
 
 typedef struct {
     Board board;
+    Clock clock;
     int serverFd;
     int clientFd[3];
     int colour[3];

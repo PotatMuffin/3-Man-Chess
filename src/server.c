@@ -1,12 +1,13 @@
 #include <stdio.h>
 #include <time.h>
 #include <string.h>
-#include <unistd.h>
-#include <fcntl.h>
-#include <poll.h>
-#include <sys/socket.h>
-#include <arpa/inet.h>
+#include <stdlib.h>
 #include "./common/common.h"
+
+#ifdef _WIN32
+    #include <sysinfoapi.h>
+    void __stdcall Sleep(unsigned long msTimeout);
+#endif
 
 double target = 0;
 
@@ -14,26 +15,38 @@ void Wait(double t);
 double GetTime();
 
 #define PLAYERS 3
-struct pollfd polls[PLAYERS+1];
+
+PollFd polls[PLAYERS+1] = {0};
+
+typedef struct {
+    Board board;
+    Socket *serverSock;
+    Socket *clients[3];
+    int colour[3];
+    int playerCount;
+} Server;
 
 MoveList legalMoves = {0};
 
+int InitServer(Server *server);
+int AwaitPlayers(Server *server);
+void CloseServer(Server *server);
+
 void Broadcast(Server *server, Message *msg)
 {
-    for(int i = 0; i < server->players; i++)
+    for(int i = 0; i < server->playerCount; i++)
     {
-        // gcc is annoying and complains when I ignore the return value of write
-        int fd = server->clientFd[i];
-        if(fd == -1) continue;
-        int _ = write(fd, msg, sizeof(Message));
+        Socket *sock = server->clients[i];
+        if(sock == NULL) continue;
+        Write(sock, msg, sizeof(Message));
     }
 }
 
 void Send(Server *server, int client, Message *msg)
 {
-    int fd = server->clientFd[client];
-    if(fd == -1) return;
-    int _ = write(fd, msg, sizeof(Message));
+    Socket *sock = server->clients[client];
+    if(sock == NULL) return;
+    Write(sock, msg, sizeof(Message));
 }
 
 void EliminatePlayer(Server *server, uint8_t colour)
@@ -48,10 +61,10 @@ void EliminatePlayer(Server *server, uint8_t colour)
     if(server->board.colourToMove == colour) NextMove(&server->board);
 }
 
-void HandleMessage(Server *server, int client, Message *msg)
+void HandleMessage(Server *server, int playerIndex, Message *msg)
 {
     Message response = {0};
-    int colour = server->colour[client];
+    int colour = server->colour[playerIndex];
     int index = (colour >> 3)-1;
 
     if(msg->flag == PLAYMOVE)
@@ -59,7 +72,7 @@ void HandleMessage(Server *server, int client, Message *msg)
         if(colour != server->board.colourToMove) 
         {
             printf("someone whose turn it isn't tried to play a move\n");
-            printf("colour of player: %d, colour to move: %d, client: %d\n", colour, server->board.colourToMove, client);
+            printf("colour of player: %d, colour to move: %d, player: %d\n", colour, server->board.colourToMove, playerIndex);
             return;
         }
 
@@ -89,29 +102,16 @@ void HandleMessage(Server *server, int client, Message *msg)
 
 int InitServer(Server *server)
 {
-    server->serverFd = socket(AF_INET, SOCK_STREAM | O_NONBLOCK, 0);
+    server->serverSock = CreateSocket();
 
-    printf("created socket with fd: %d\n", server->serverFd);
-    if(server->serverFd < 0) 
+    if(server->serverSock == NULL) 
     {
         printf("failed creating socket\n");
         return 1;
     }
+    printf("created socket with fd: %d\n", SocketFd(server->serverSock));
 
-    struct sockaddr_in addr;
-    memset(&addr, 0, sizeof addr);
-
-    addr.sin_family = AF_INET;
-    addr.sin_port = htons(PORT);
-    addr.sin_addr.s_addr = htonl(INADDR_ANY);
-
-    int yes = 1;
-    setsockopt(server->serverFd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(true));
-    if(bind(server->serverFd, (struct sockaddr  *)&addr, sizeof(addr)) < 0) 
-    {
-        printf("failed binding socket\n");
-        return 1;
-    }
+    if(!Bind(server->serverSock, PORT)) return 1;
 
     return 0;
 }
@@ -119,49 +119,36 @@ int InitServer(Server *server)
 int AwaitPlayers(Server *server)
 {
     Message msg = {0};
-    polls[0] = (struct pollfd) { .fd = server->serverFd, .events = POLLIN | POLLPRI };
-    if(listen(server->serverFd, 3) < 0) 
-    {
-        printf("failed to listen\n");
-        return 1;
-    }
+    if(!Listen(server->serverSock, 3)) return 1;
+    polls[0] = (PollFd) { .sock = server->serverSock, .events = PollRead | PollUrgent, .revents = 0 };
 
-    while(server->players != 3)
+    while(server->playerCount != 3)
     {
-        int res = poll(&polls[0], PLAYERS+1, -1);
-        if(res <= 0) continue;
+        int count = Poll(&polls[0], server->playerCount+1, -1);
+        if(count == 0) continue;
 
-        for(int i = 0; i <= server->players; i++)
+        for(int i = 0; i <= server->playerCount; i++)
         {
             if((polls[i].revents & polls[i].events) == 0) continue;
             if(i == 0)
             {
-                struct sockaddr client = {0};
-                int clientSize = 0;
-
-                int clientFd = accept(server->serverFd, &client, &clientSize);
-                fcntl(clientFd, F_SETFL, O_NONBLOCK);
-                if(clientFd < 0) 
-                {
-                    printf("couldn't accept connection\n");
-                    return 1;
-                }
-                printf("client connected with fd: %d\n", clientFd);
-
-                server->clientFd[server->players++] = clientFd;
-                polls[server->players] = (struct pollfd) { .fd = clientFd, .events = POLLIN };
+                Socket *clientSock = Accept(server->serverSock);
+                server->clients[server->playerCount++] = clientSock;
+                printf("client joined with fd %d\n", SocketFd(clientSock));
+                polls[server->playerCount] = (PollFd){ .sock = clientSock, .events = PollRead };
             }
             else
             {
-                int fd = polls[i].fd;
-                int rc = read(fd, &msg, sizeof(msg));
+                Socket *sock = polls[i].sock;
+                int rc = Read(sock, &msg, sizeof(msg));
                 if(rc <= 0)
                 {
-                    printf("client with fd %d has disconnected\n", fd);
-                    close(fd);
-                    server->players--;
-                    server->clientFd[i-1] = server->clientFd[server->players];
-                    polls[i].fd           = server->clientFd[server->players];
+                    printf("client with fd %d has disconnected\n", SocketFd(sock));
+                    Close(sock);
+                    
+                    server->playerCount--;
+                    server->clients[i-1] = server->clients[server->playerCount];
+                    polls[i].sock        = server->clients[server->playerCount];
                 }
             }
         }
@@ -216,33 +203,38 @@ void StartGame(Server *server, char *FEN)
         }
 
         UpdateClock(&server->board, deltaTime);
-        if(FlaggedClock(&server->board)) EliminatePlayer(server, server->board.colourToMove);
-
-        int res = poll(polls, PLAYERS+1, 0);
-
-        for(int i = 1; res > 0 && i <= server->players; i++)
+        if(FlaggedClock(&server->board)) 
         {
-            int client = i-1;
-            Message msg = {0};
-            if((polls[i].revents & POLLIN) == 0) continue;
-            int fd = polls[i].fd;
+            EliminatePlayer(server, server->board.colourToMove);
+            if(server->board.eliminatedColour != 0) return;
+        }
 
-            int rc = read(fd, &msg, sizeof(msg));
+        int res = Poll(&polls[0], PLAYERS+1, 0);
+
+        for(int i = 1; res > 0 && i <= server->playerCount; i++)
+        {
+            int playerIndex = i-1;
+            Message msg = {0};
+            if((polls[i].revents & PollRead) == 0) continue;
+            Socket *sock = polls[i].sock;
+
+            int rc = Read(sock, &msg, sizeof(msg));
             if(rc <= 0) 
             {
-                printf("client with fd %d disconnected\n", fd);
-                close(server->clientFd[client]);
+                printf("client with fd %d disconnected\n", SocketFd(sock));
+                Close(server->clients[playerIndex]);
 
-                uint8_t colour = server->colour[client];
+                server->playerCount--;
+                server->clients[playerIndex] = server->clients[server->playerCount];
+                polls[i].sock                = server->clients[server->playerCount];
+                server->colour[playerIndex]  = server->colour [server->playerCount];
+                if(server->board.eliminatedColour != 0) return;
+            
+                uint8_t colour = server->colour[playerIndex];
                 EliminatePlayer(server, colour);
-
-                server->players--;
-                server->clientFd[client] = server->clientFd[server->players];
-                polls[i].fd              = server->clientFd[server->players];
-                server->colour[client]   = server->colour[server->players];
                 continue;
             }
-            HandleMessage(server, client, &msg);
+            HandleMessage(server, playerIndex, &msg);
         }
 
         double end = GetTime();
@@ -253,40 +245,50 @@ void StartGame(Server *server, char *FEN)
 
 void CloseServer(Server *server)
 {
-    for(int i = 0; i < server->players; i++)
+    for(int i = 0; i < server->playerCount; i++)
     {
-        shutdown(server->clientFd[i], SHUT_RDWR);
-        close(server->clientFd[i]);
+        // shutdown(server->clientFd[i], SHUT_RDWR);
+        Close(server->clients[i]);
     }
-    close(server->serverFd);
+    Close(server->serverSock);
 }
 
 // the functions Wait and GetTime were "inspired" by raylib
 void Wait(double t)
 {
-    if(t <= 0) return;
-    struct timespec time = {0};
-    time.tv_sec = (time_t)t;
-    time.tv_nsec = (t*1000000000ULL - time.tv_sec);
-    while(nanosleep(&time, &time) == -1);
+    #if defined(_WIN32)
+        Sleep(t * 1000);
+    #elif defined(__GNUC__)
+        if(t <= 0) return;
+        struct timespec time = {0};
+        time.tv_sec = (time_t)t;
+        time.tv_nsec = (t*1000000000ULL - time.tv_sec);
+        while(nanosleep(&time, &time) == -1);
+    #endif
 }
 
 double GetTime()
 {
-    struct timespec ts = {0};
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    double t = ts.tv_sec;
-    t += (double)ts.tv_nsec / (double)1000000000.0;
-    return t;
+    #if defined(_WIN32)
+        return (double)GetTickCount64() / 1000;
+    #elif defined(__GNUC__)
+        struct timespec ts = {0};
+        clock_gettime(CLOCK_MONOTONIC, &ts);
+        double t = ts.tv_sec;
+        t += (double)ts.tv_nsec / (double)1000000000.0;
+        return t;
+    #endif
 }
 
 int main()
 {
+    InitSockets();
     target = 1.0/60.0;
     Server server = {0};
     if(InitServer(&server) != 0) return 1;
     if(AwaitPlayers(&server) != 0) return 1;
     StartGame(&server, DEFAULT_FEN);
     CloseServer(&server);
+    CleanupSockets();
     return 0;
 }

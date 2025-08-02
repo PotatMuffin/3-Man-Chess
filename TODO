@@ -1,4 +1,4 @@
- - write a function to check if a piece is able to cross a moat:
+ - write a function to check if a piece is able to cross a moat: - DONE
     - moat must be bridged
     - cant capture after crossing
     - cant check after crossing
@@ -7,5 +7,5 @@
  - server must handle clients disconnecting while awaiting players - DONE
  - eliminate player when disconnected - DONE
  - add clocks - DONE
- - port to winblows
+ - port to winblows - DONE
 

@@ -81,7 +81,19 @@ enum MessageFlag {
     PLAYMOVE,
     MOVEPLAYED,
     ELIMINATED,
+    ENDOFGAME,
+};
 
+enum EndFlag {
+    TIMEOUT,
+    CHECKMATE,
+    ABANDONMENT,
+    RESIGNATION,
+    STALEMATE,
+    FIFTYRULE,
+    INSUFFMAT,
+    AGREEMENT,
+    REPETITION,
 };
 
 struct GameStart {
@@ -108,12 +120,19 @@ struct Eliminated {
     double clockTime;
 };
 
+struct EndOfGame {
+    uint16_t flag;
+    uint8_t  winner; // 0 if its a draw, else its WHITE, GRAY, or BLACK depending on who won
+    uint8_t  reason; // reason the game terminated, ( e.g. checkmate, stalemate, timeout )
+};
+
 typedef union {
     uint16_t flag;
     struct GameStart gameStart;
     struct PlayMove playMove;
     struct MovePlayed movePlayed;
     struct Eliminated eliminated;
+    struct EndOfGame endOfGame;
 } Message;
 
 typedef struct {
@@ -122,13 +141,26 @@ typedef struct {
     int capacity;
 } MoveList;
 
+typedef struct Socket Socket;
+
+typedef enum {
+    #ifdef _WIN32
+        PollWrite  = 16,
+        PollRead   = 256,
+        PollUrgent = 0, // ignored since POLLPRI on windows is not supported
+    #elif __GNUC__
+        PollRead   = 1,
+        PollUrgent = 2,
+        PollWrite  = 4,
+    #endif
+} PollEvent;
+
 typedef struct {
-    Board board;
-    int serverFd;
-    int clientFd[3];
-    int colour[3];
-    int players;
-} Server;
+    Socket *sock;
+    uint32_t events;
+    uint32_t revents;
+} PollFd;
+
 
 inline uint8_t GetPieceType(uint8_t piece) { return piece & PIECEMASK; }
 inline uint8_t GetPieceColour(uint8_t piece) { return piece & COLOURMASK; }
@@ -292,8 +324,18 @@ inline bool IsNullMove(Move move)
     return move.start == 0 && move.target == 0;
 }
 
-int InitServer(Server *server);
-int AwaitPlayers(Server *server);
-void CloseServer(Server *server);
+int InitSockets();
+void CleanupSockets();
+Socket *JoinGame(char *ip, short port);
+Socket *CreateSocket();
+bool Bind(Socket *sock, int port);
+bool Listen(Socket *sock, int backlog);
+Socket *Accept(Socket *sock);
+int Poll(PollFd *Ppolls, int count, int timeout);
+int Read(Socket *sock, void *dest, int count);
+int Write(Socket *sock, void *src, int count);
+bool IsValidConnection(Socket *sock);
+int SocketFd(Socket *sock);
+void Close(Socket *sock);
 
 #endif

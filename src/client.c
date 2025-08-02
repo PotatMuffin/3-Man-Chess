@@ -1,14 +1,14 @@
 #include <stdio.h>
 #include <unistd.h>
 #include <math.h>
-#include <sys/socket.h>
-#include <arpa/inet.h>
-#include <fcntl.h>
 #include <string.h>
-#include <poll.h>
 #include "./common/common.h"
-#include "../dep/raylib/raylib.h"
-#include "../dep/raylib/raymath.h"
+#include "raylib.h"
+#include "raymath.h"
+
+#define BACKGROUND      GetColor(0x181818FF)
+#define CLOCKBACKGROUND GetColor(0x202020FF)
+#define BOARDBORDER     GetColor(0x664a3eFF)
 
 #define MAX_CHARS 16
 #define WIDTH 1920
@@ -22,7 +22,6 @@ const int boardRadius = centerSize+rankSize*6;
 float scaleX = 0;
 float scaleY = 0;
 
-struct sockaddr_in serverAddr;
 Message msg = {0};
 
 enum {
@@ -41,18 +40,19 @@ Vector2 SquareCenterCoords[144];
 
 void DrawBoard(Board *board, Texture2D spriteSheet);
 void InitSquareCenterCoords();
-void HandleInput(Board *board, int sockFd);
+void HandleInput(Board *board, Socket *sock);
 void HighlightSquares(int square, MoveList *moveList);
 void HighlightSquare(int square);
 void ResetSquares();
 void DrawClock(Board *board);
-int JoinGame(char *ip, short port);
-int PollConnection(int fd);
-int HandleServerMessage(int sockFd, Board *board);
+int PollConnection(Socket *sock);
+int HandleServerMessage(Socket *sock, Board *board);
 void Send(int fd, Message *msg);
 
 int main()
 {
+    if(InitSockets() != 0) return 1;
+
     Board board = {0};
     int result = InitBoard(&board, DEFAULT_FEN);
     if(result != 0) return 1;
@@ -78,7 +78,7 @@ int main()
     bool connecting = false;
     bool connectionFailed = false;
     double connectTime = 0.0f;
-    int sockFd = -1;
+    Socket *sock = NULL;
 
     while(!WindowShouldClose())
     {
@@ -93,7 +93,7 @@ int main()
 
         double deltaTime = GetFrameTime();
         BeginTextureMode(target);
-        ClearBackground(GetColor(0x181818FF));
+        ClearBackground(BACKGROUND);
 
         if(IsKeyPressed(KEY_F11))
         {
@@ -113,20 +113,23 @@ int main()
             UpdateClock(&board, deltaTime);
             DrawClock(&board);
 
-            int res = HandleServerMessage(sockFd, &board);
+            int res = HandleServerMessage(sock, &board);
             if(res != 0) 
             {
                 GameInProgress = false;
-                sockFd = -1;
+                Close(sock);
+                sock = NULL;
+
+                LoadFen(&board, DEFAULT_FEN);
             }
-            HandleInput(&board, sockFd);
+            HandleInput(&board, sock);
         }
         else 
         {
             if(connecting)
             {
                 DrawText("Connecting...", 55, 115, 40, RL_MAROON);
-                int res = PollConnection(sockFd);
+                int res = PollConnection(sock);
                 if(res == 0)
                 {
                     if(connectTime >= 5.0f) 
@@ -137,7 +140,7 @@ int main()
                     }
                     connectTime += deltaTime;
                 }
-                else if(res == sockFd)
+                else if(res == 1)
                 {
                     connecting = false;
                     connectTime = 0.0f;
@@ -161,14 +164,21 @@ int main()
                 charCount--;
                 ip[charCount] = '\0';
             }
+
             if(IsKeyPressed(KEY_ENTER) && charCount > 0)
             {
                 if(!connecting)
                 {
-                    sockFd = JoinGame(ip, PORT);
-                    if(sockFd > 0) connecting = true;
+                    sock = JoinGame(ip, PORT);
+                    if(sock != NULL) 
+                    {
+                        connecting = true;
+                        connectionFailed = false;
+                    }
+                    else connectionFailed = true;
                 }
             }
+
             if(IsKeyDown(KEY_LEFT_CONTROL))
             {
                 if(IsKeyPressed(KEY_V))
@@ -204,23 +214,24 @@ int main()
 
             Rectangle textBox = { .x = 50, .y = 50, .width = 300, .height = 50};
             DrawRectangleRec(textBox, RL_LIGHTGRAY);
-            DrawRectangleLinesEx(textBox, 2, GetColor(0xFFFFFFFF));
+            DrawRectangleLinesEx(textBox, 2, RL_WHITE);
             DrawText(ip, textBox.x+5, textBox.y+8, 40, RL_MAROON);
         }
         DrawFPS(0, 0);
         DrawBoard(&board, spriteSheet);
         EndTextureMode();
 
-        DrawTexturePro(target.texture, (Rectangle){0, 0, target.texture.width, -target.texture.height}, (Rectangle){0, 0, width, height}, (Vector2){0,0}, 0, GetColor(0xFFFFFFFF));
+        DrawTexturePro(target.texture, (Rectangle){0, 0, target.texture.width, -target.texture.height}, (Rectangle){0, 0, width, height}, (Vector2){0,0}, 0, RL_WHITE);
         EndDrawing();
     }
 
+    CleanupSockets();
     UnloadRenderTexture(target);
     CloseWindow();
     return 0;
 }
 
-void HandleInput(Board *board, int sockFd)
+void HandleInput(Board *board, Socket *sock)
 {
     if(IsMouseButtonPressed(MOUSE_LEFT_BUTTON))
     {
@@ -281,7 +292,7 @@ void HandleInput(Board *board, int sockFd)
 
             msg.flag = PLAYMOVE;
             msg.playMove.move = chosenMove;
-            Send(sockFd, &msg);
+            Write(sock, &msg, sizeof(msg));
             // MakeMove(board, chosenMove);
         }
     }
@@ -333,7 +344,7 @@ inline void ResetSquares()
 void DrawBoard(Board *board, Texture2D spriteSheet)
 {
     Vector2 center = {WIDTH/2, HEIGHT/2};
-    DrawCircle(center.x, center.y, centerSize+rankSize*6+borderSize, GetColor(0x664a3eFF));
+    DrawCircle(center.x, center.y, centerSize+rankSize*6+borderSize, BOARDBORDER);
 
     for(int i = 0; i < 6; i++)
     {
@@ -374,7 +385,7 @@ void DrawBoard(Board *board, Texture2D spriteSheet)
         DrawLineEx(startPos, endPosMoat, 8, RL_BLUE);
         DrawLineEx(startPos, endPosCreek, 4, RL_BLUE);
     }
-    DrawCircle(center.x, center.y, centerSize, GetColor(0x664a3eFF));
+    DrawCircle(center.x, center.y, centerSize, BOARDBORDER);
 
     for(int square = 0; square < 144; square++)
     {
@@ -424,7 +435,7 @@ void DrawBoard(Board *board, Texture2D spriteSheet)
             Vector2 position =  SquareCenterCoords[index];
             DrawTexturePro(spriteSheet, pieceSprite, 
                 (Rectangle){position.x, position.y, size, size}, 
-                (Vector2){size/2, size/2}, 0, GetColor(0xFFFFFFFF));
+                (Vector2){size/2, size/2}, 0, RL_WHITE);
         }
     }
 }
@@ -440,7 +451,7 @@ void DrawClock(Board *board)
     for(int i = 0; i < 3; i++)
     {
         int index = (i + perspective) % 3;
-        Color colour = GetColor(0x202020FF);
+        Color colour = CLOCKBACKGROUND;
         Rectangle ClockBox = clockBoxes[i];
         DrawRectangleRec(ClockBox, colour);
 
@@ -459,57 +470,34 @@ void DrawClock(Board *board)
     }
 }
 
-int JoinGame(char *ip, short port)
+// returns -1 upon error
+//          0 when still awaiting
+//          1 upon success 
+int PollConnection(Socket *sock)
 {
-    int fd = socket(AF_INET, SOCK_STREAM | O_NONBLOCK, 0);
+    PollFd poll = { .sock = sock, .events = PollWrite, .revents = 0 };
 
-    memset(&serverAddr, 0, sizeof serverAddr);
+    int count = Poll(&poll, 1, 0);
+    if(count == 0) return 0;
 
-    serverAddr.sin_family = AF_INET;
-    serverAddr.sin_port = htons(port);
-    serverAddr.sin_addr.s_addr = inet_addr(ip);
-    if(serverAddr.sin_addr.s_addr == -1) return -1;
-
-    connect(fd, (struct sockaddr *)&serverAddr, sizeof(serverAddr));
-
-    return fd;
-}
-
-int PollConnection(int fd)
-{
-    struct pollfd pollFd = {
-        .fd = fd,
-        .events = POLLOUT
-    };
-
-    struct sockaddr addr = {0};
-    int size = sizeof(addr);
-
-    int res = poll(&pollFd, 1, 0);
-    if(res <= 0) return 0;
-
-    if(getpeername(fd, &addr, &size) != 0)
+    if(!IsValidConnection(sock))
     {
-        printf("failed to connect\n");
         return -1;
     }
-    return fd;
+
+    return 1;
 }
 
-int HandleServerMessage(int sockFd, Board *board)
+int HandleServerMessage(Socket *sock, Board *board)
 {
-    struct pollfd pollFd = {
-        .fd = sockFd,
-        .events = POLLIN
-    };
+    PollFd poll = { .sock = sock, .events = PollRead, .revents = 0};
 
-    poll(&pollFd, 1, 0);
+    int count = Poll(&poll, 1, 0);
+    if(count == 0) return 0;
 
-    if((pollFd.revents & POLLIN) == 0) return 0;
-    int rc = read(sockFd, &msg, sizeof(msg));
+    int rc = Read(sock, &msg, sizeof(msg));
     if(rc == 0) 
     {
-        close(sockFd);
         return 1;
     }
 
@@ -536,9 +524,4 @@ int HandleServerMessage(int sockFd, Board *board)
         if(board->colourToMove == colour) NextMove(board);
     }
     return 0;
-}
-
-void Send(int fd, Message *msg)
-{
-    int _ = write(fd, msg, sizeof(*msg));
 }

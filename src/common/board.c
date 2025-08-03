@@ -1,5 +1,7 @@
 #include "./common.h"
 
+bool IsBackRankVacated(Board *board, uint8_t section);
+
 int InitBoard(Board *board, char *FEN)
 {
     *board = (Board){0};
@@ -13,6 +15,15 @@ int InitBoard(Board *board, char *FEN)
 
         PieceList *pieceList = GetPieceList(board, piece);
         AddPiece(pieceList, i);
+    }
+
+    for(int i = 0; i < 3; i++)
+    {
+        if(IsBackRankVacated(board, i))
+        {
+            board->bridgedMoats[i] = true;
+            board->bridgedMoats[(i+1)%3] = true;
+        }
     }
 }
 
@@ -120,6 +131,15 @@ void MakeMove(Board *board, Move move)
     if(move.start == 16 || move.target == 16) board->castleRights[2].kingSide  = false;
     if(move.start == 23 || move.target == 23) board->castleRights[2].queenSide = false;
     
+    for(int i = 0; i < 3; i++)
+    {
+        if(IsBackRankVacated(board, i))
+        {
+            board->bridgedMoats[i] = true;
+            board->bridgedMoats[(i+1)%3] = true;
+        }
+    }
+
     NextMove(board);
 }
 
@@ -145,7 +165,18 @@ void NextMove(Board *board)
 void EliminateColour(Board *board, uint8_t colour)
 {
     board->eliminatedColour = colour;
+    board->eliminatedPlayerCount++;
     int index = (colour >> 3)-1;
     board->bridgedMoats[index] = true;
     board->bridgedMoats[(index+1)%3] = true;
+}
+
+bool IsBackRankVacated(Board *board, uint8_t section)
+{
+    for(int i = 0; i < 8; i++)
+    {
+        int index = section * 8 + i;
+        if(board->map[index] != NONE) return false; 
+    }
+    return true;
 }

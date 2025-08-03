@@ -797,7 +797,8 @@ bool IsEnPassantCheck(Board *board, Move move)
 
             uint8_t piece = board->map[move.target];
             if(piece == NONE) continue;
-            if(IsColour(piece, board->colourToMove)) break;
+            if(IsColour(piece, board->colourToMove))     break;
+            if(IsColour(piece, board->eliminatedColour)) break;
              
             if(!(dir < 4 && IsQueenOrRook(piece)) && !(dir >= 4 && IsQueenOrBishop(piece))) break;
             isCheck = true;

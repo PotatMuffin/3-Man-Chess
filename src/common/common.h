@@ -55,6 +55,7 @@ typedef struct {
     bool bridgedMoats[3];
     uint8_t colourToMove;
     uint8_t eliminatedColour;
+    uint8_t eliminatedPlayerCount;
     Clock clock;
 } Board;
 

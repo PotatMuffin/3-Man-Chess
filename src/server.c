@@ -225,15 +225,17 @@ void StartGame(Server *server, char *FEN)
                 printf("client with fd %d disconnected\n", SocketFd(sock));
                 Close(server->clients[playerIndex]);
 
-                bool mate2 = server->board.eliminatedColour != 0;
                 uint8_t colour = server->colour[playerIndex];
-                EliminatePlayer(server, colour);
+                if(colour != server->board.eliminatedColour)
+                {
+                    EliminatePlayer(server, colour);
+                    if(server->board.eliminatedPlayerCount > 1) return;
+                }
 
                 server->playerCount--;
                 server->clients[playerIndex] = server->clients[server->playerCount];
                 polls[i].sock                = server->clients[server->playerCount];
                 server->colour[playerIndex]  = server->colour [server->playerCount];
-                if(mate2) return;
                 continue;
             }
             HandleMessage(server, playerIndex, &msg);
@@ -258,10 +260,10 @@ void CloseServer(Server *server)
 // the functions Wait and GetTime were "inspired" by raylib
 void Wait(double t)
 {
+    if(t <= 0) return;
     #if defined(_WIN32)
         Sleep(t * 1000);
     #elif defined(__GNUC__)
-        if(t <= 0) return;
         struct timespec time = {0};
         time.tv_sec = (time_t)t;
         time.tv_nsec = (t*1000000000ULL - time.tv_sec);

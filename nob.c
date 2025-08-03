@@ -12,6 +12,15 @@
 #define CLIENT_PATH SRC_DIR"client.c"
 #define SERVER_PATH SRC_DIR"server.c"
 #define COMMON_A "common.a" 
+#define ASSETS_DIR "./assets/"
+#define BUNDLE_H_PATH BUILD_DIR"bundle.h"
+#define SHIP_DIR "./ship/"
+
+typedef struct {
+    char   *file;
+    size_t offset;
+    size_t length;
+} Asset;
 
 char *raylib_modules[] = {
     "rcore",
@@ -31,14 +40,75 @@ char *common_files[] = {
     "sockets"
 };
 
+Asset assets[] = {
+    { .file = ASSETS_DIR"pieces.png", .offset = 0, .length = 0 },
+};
+
 #include "build_src/nob_linux.c"
 #include "build_src/nob_mingw.c"
+
+bool bundle_assets()
+{
+    Nob_String_Builder bundle = { 0 };
+    bool rebuild = true;
+
+    for(int i = 0; i < NOB_ARRAY_LEN(assets); i++)
+    {
+        rebuild = rebuild && nob_needs_rebuild1(BUNDLE_H_PATH, assets[i].file);
+    }
+
+    if(!rebuild) return true;
+    nob_log(NOB_INFO, "bundling assets!");
+
+    for(int i = 0; i < NOB_ARRAY_LEN(assets); i++)
+    {
+        assets[i].offset = bundle.count;
+        nob_read_entire_file(assets[i].file, &bundle);
+        assets[i].length = bundle.count - assets[i].offset;
+    }
+
+    Nob_String_View bundle_view = nob_sb_to_sv(bundle);
+    Nob_String_Builder bundle_h_content = {0};
+
+    nob_sb_appendf(&bundle_h_content,  "typedef struct {\n\tchar *file;\n\tsize_t offset;\n\tsize_t length;\n} Asset;\n");
+    nob_sb_appendf(&bundle_h_content, "Asset assets[] = {\n");
+
+
+    for(int i = 0; i < NOB_ARRAY_LEN(assets); i++)
+    {
+        nob_sb_appendf(&bundle_h_content, "\t{ .file = \"%s\", .offset = %ld, .length = %ld },\n", assets[i].file, assets[i].offset, assets[i].length);
+    }
+    nob_sb_appendf(&bundle_h_content, "};\n");
+    nob_sb_appendf(&bundle_h_content, "extern const char bundle[];\n");
+
+    nob_sb_appendf(&bundle_h_content, "#ifdef BUNDLE_CONTENT\n");
+    nob_sb_appendf(&bundle_h_content, "const char bundle[] = {\n");
+
+    int i = 0;
+    while(i < bundle_view.count)
+    {
+        nob_sb_appendf(&bundle_h_content, "\t");
+        for(int j = 0; j < 20 && i < bundle_view.count; j++, i++)
+        {
+            nob_sb_appendf(&bundle_h_content, "0x%02hhX, ", bundle_view.data[i]);
+        }
+        nob_sb_appendf(&bundle_h_content, "\n");
+    }
+    nob_sb_appendf(&bundle_h_content, "};\n");
+    nob_sb_appendf(&bundle_h_content, "#endif // BUNDLE_CONTENT\n");
+
+    nob_write_entire_file(BUNDLE_H_PATH, bundle_h_content.items, bundle_h_content.count);
+
+    return true;
+}
 
 int main(int argc, char **argv)
 {
     NOB_GO_REBUILD_URSELF_PLUS(argc, argv, "./build_src/nob_linux.c", "./build_src/nob_mingw.c");
     if(!nob_mkdir_if_not_exists(BUILD_DIR)) return 1;
     if(!nob_mkdir_if_not_exists(RAYLIB_BUILD_DIR)) return 1;
+
+    if(!bundle_assets()) return 1;
 
     if(!build_raylib_linux()) return 1;
     if(!build_common_linux()) return 1;
@@ -49,6 +119,35 @@ int main(int argc, char **argv)
     if(!build_common_mingw()) return 1;
     if(!build_client_mingw()) return 1;
     if(!build_server_mingw()) return 1;
+
+    char *program = nob_shift_args(&argc, &argv);
+
+    if(argc > 0)
+    {
+        char *option = nob_shift_args(&argc, &argv);
+        if(strcmp(option, "--help") == 0)
+        {
+            printf("usage: %s\n", program);
+            printf("options:\n");
+            printf("\t--help: print this message\n");
+            printf("\t--ship: make files ready for shipping\n");
+        }
+        else if(strcmp(option, "--ship") == 0)
+        {
+            if(!nob_mkdir_if_not_exists(SHIP_DIR)) return 1;
+
+            printf("preparing files for shipping!\n");
+            Nob_Cmd cmd = { 0 };
+            nob_cmd_append(&cmd, "zip", "-q", SHIP_DIR"3_man_chess_linux.zip");
+            nob_cmd_append(&cmd, CLIENT_OUTPUT_PATH, SERVER_OUTPUT_PATH);
+            nob_cmd_run_sync(cmd);
+
+            cmd.count = 0;
+            nob_cmd_append(&cmd, "zip", "-q", SHIP_DIR"3_man_chess_windows.zip");
+            nob_cmd_append(&cmd, CLIENT_OUTPUT_PATH".exe", SERVER_OUTPUT_PATH".exe");
+            nob_cmd_run_sync(cmd);
+        }
+    }
 
     return 0;
 }

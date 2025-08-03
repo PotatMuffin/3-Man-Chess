@@ -6,6 +6,9 @@
 #include "raylib.h"
 #include "raymath.h"
 
+#define BUNDLE_CONTENT
+#include "bundle.h"
+
 #define BACKGROUND      GetColor(0x181818FF)
 #define CLOCKBACKGROUND GetColor(0x202020FF)
 #define BOARDBORDER     GetColor(0x664a3eFF)
@@ -70,7 +73,8 @@ int main()
     scaleY = (float)height/HEIGHT;
 
     InitSquareCenterCoords();
-    Texture2D spriteSheet = LoadTexture("./sprites/pieces.png");
+    Image pieces = LoadImageFromMemory(".png", &bundle[0], assets[0].length);
+    Texture2D spriteSheet = LoadTextureFromImage(pieces);
 
     char ip[MAX_CHARS+1] = "\0";
     int charCount = 0;
@@ -119,8 +123,8 @@ int main()
                 GameInProgress = false;
                 Close(sock);
                 sock = NULL;
-
-                LoadFen(&board, DEFAULT_FEN);
+                
+                InitBoard(&board, DEFAULT_FEN);
             }
             HandleInput(&board, sock);
         }

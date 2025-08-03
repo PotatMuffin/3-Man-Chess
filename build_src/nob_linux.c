@@ -103,7 +103,7 @@ bool build_client_linux()
         nob_cmd_append(&cmd, deps.items[i]);
     }
 
-    nob_cmd_append(&cmd, "-I"RAYLIB_SRC_DIR);
+    nob_cmd_append(&cmd, "-I"RAYLIB_SRC_DIR, "-I"BUILD_DIR);
     nob_cmd_append(&cmd, "-lm", "-O1", "-ggdb");
 
     if(!nob_cmd_run_sync(cmd)) return false;
@@ -129,7 +129,6 @@ bool build_server_linux()
         nob_cmd_append(&cmd, deps.items[i]);
     }
 
-    nob_cmd_append(&cmd, "-I"RAYLIB_SRC_DIR);
     nob_cmd_append(&cmd, "-lm", "-O1", "-ggdb");
 
     if(!nob_cmd_run_sync(cmd)) return false;

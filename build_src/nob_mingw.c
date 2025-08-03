@@ -105,7 +105,7 @@ bool build_client_mingw()
         nob_cmd_append(&cmd, deps.items[i]);
     }
 
-    nob_cmd_append(&cmd, "-I"RAYLIB_SRC_DIR);
+    nob_cmd_append(&cmd, "-I"RAYLIB_SRC_DIR, "-I"BUILD_DIR);
     nob_cmd_append(&cmd, "-lm", "-O1");
     nob_cmd_append(&cmd, "-mwindows", "-static-libgcc", "-lwinmm", "-lws2_32");
 
@@ -132,7 +132,6 @@ bool build_server_mingw()
         nob_cmd_append(&cmd, deps.items[i]);
     }
 
-    nob_cmd_append(&cmd, "-I"RAYLIB_SRC_DIR);
     nob_cmd_append(&cmd, "-lm", "-O1");
     nob_cmd_append(&cmd, "-mwindows", "-static-libgcc", "-lwinmm", "-lws2_32");
 

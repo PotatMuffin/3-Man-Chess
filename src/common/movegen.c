@@ -633,13 +633,14 @@ bool CrossesMoat(Move move, int dir, int distance)
         {
             Move prevMove = moves[move.start][dir][distance-1];
             int file = prevMove.target % 24;
+            startRank = prevMove.target / 24;
             section = file / 8;
         }
         else 
         {
             section = startSection;
         }
-        return targetRank == 0 && section != targetSection;
+        return (startRank == 0 || targetRank == 0) && section != targetSection;
     }
     else return false;
 }
@@ -660,13 +661,12 @@ bool CanCrossMoat(Board *board, Move move, int dir, int distance)
 {
     int pieceType = GetPieceType(board->map[move.start]);
     int moat = -1;
-    bool canCross = false;
 
-    int startRank = move.start / 24;
-    int startFile = move.start % 24;
-    int startSection = move.start / 8;
-    int targetRank = move.target / 24;
-    int targetFile = move.target % 24;
+    int startRank     = move.start / 24;
+    int startFile     = move.start % 24;
+    int startSection  = startFile / 8;
+    int targetRank    = move.target / 24;
+    int targetFile    = move.target % 24;
     int targetSection = targetFile / 8;
 
     if(pieceType != KNIGHT)
@@ -708,8 +708,8 @@ bool CrossesCreek(Move move)
 
 bool blocksCheck(Move move)
 {
-    if(checks == 0)      return true;
-    else if(checks == 1) return checkBlockMap[move.target];
+    if(checks == 0)       return true;
+    else if(checks == 1)  return checkBlockMap[move.target];
     else if(checks > 1)   return checkingPiecesMap[move.target];
 }
 
@@ -726,7 +726,7 @@ bool ChecksEnemy(Board *board, Move move)
         {
             for(int i = 0; i < 24; i++)
             {
-                Move m = moves[move.start][dir][i];
+                Move m = moves[move.target][dir][i];
                 if(CrossesMoat(m, dir, i)) break;
                 int piece = board->map[m.target];
                 if(GetPieceType(piece) == KING && GetPieceColour(piece) != board->colourToMove) return true;
@@ -738,7 +738,7 @@ bool ChecksEnemy(Board *board, Move move)
     {
         for(int i = 0; i < 8; i++)
         {
-            Move m = knightMoves[move.start][i];
+            Move m = knightMoves[move.target][i];
             int piece = board->map[m.target];
             if(GetPieceType(piece) == KING && GetPieceColour(piece) != board->colourToMove) return true;
         }

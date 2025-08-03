@@ -29,6 +29,7 @@ bool ChecksEnemy(Board *board, Move move);
 bool MovingAlongRay(int square, int dir);
 bool KnightMovingAlongRay(int square, Move move, int dir);
 bool IsEnPassant(Board *board, Move move);
+bool IsEnPassantCheck(Board *board, Move move);
 
 bool dataGenerated = false;
 Move moves[144][8][24] = {0};
@@ -267,7 +268,11 @@ void GeneratePawnMoves(Board *board, MoveList *moveList)
             int piece = board->map[move.target];
             uint8_t flag = NOFLAG;
             if(rank == 5 && targetRank == 5) flag = PAWNCROSSCENTER; 
-            else if(IsEnPassant(board, move)) flag = ENPASSANT;
+            else if(IsEnPassant(board, move))
+            {
+                if(IsEnPassantCheck(board, move)) continue;
+                flag = ENPASSANT;
+            } 
 
             if((piece != NONE && !IsColour(piece, board->colourToMove)) || flag == ENPASSANT)
             {
@@ -771,4 +776,36 @@ bool IsEnPassant(Board *board, Move move)
         if(board->enPassantSquares[i] == move.target) return true;
     }
     return false;
+}
+
+bool IsEnPassantCheck(Board *board, Move move)
+{
+    char colour = GetPieceColour(board->map[move.target + 24]);
+    bool isCheck = false;
+
+    board->map[move.target + 24] = NONE;
+    board->map[move.target] = board->map[move.start];
+    board->map[move.start] = NONE;
+
+    for(int dir = 0; dir < 8; dir++)
+    {
+        for(int i = 0; i < 24; i++)
+        {
+            Move move = moves[friendKingSquare][dir][i];
+            if(IsNullMove(move)) break;
+            if(CrossesMoat(move, dir, i)) break;
+
+            uint8_t piece = board->map[move.target];
+            if(piece == NONE) continue;
+            if(IsColour(piece, board->colourToMove)) break;
+             
+            if(!(dir < 4 && IsQueenOrRook(piece)) && !(dir >= 4 && IsQueenOrBishop(piece))) break;
+            isCheck = true;
+        }
+    }
+
+    board->map[move.target + 24] = PAWN | colour;
+    board->map[move.start] = board->map[move.target];
+    board->map[move.target] = NONE;
+    return isCheck;
 }

@@ -293,6 +293,7 @@ inline int DownRight(int square, int distance)
 
 void GenerateMoves(Board *board, MoveList *moveList);
 bool InCheck();
+bool ChecksEnemy(Board *board, Move move);
 
 inline int GetIndex(int rank, int file, int section) { return rank*24+file+section*8; }
 

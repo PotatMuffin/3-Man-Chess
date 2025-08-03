@@ -41,7 +41,13 @@ char *common_files[] = {
 };
 
 Asset assets[] = {
-    { .file = ASSETS_DIR"pieces.png", .offset = 0, .length = 0 },
+    { .file = "pieces.png",    .offset = 0, .length = 0 },
+    { .file = "move.mp3",      .offset = 0, .length = 0 },
+    { .file = "check.mp3",     .offset = 0, .length = 0 },
+    { .file = "castle.mp3",    .offset = 0, .length = 0 },
+    { .file = "promote.mp3",   .offset = 0, .length = 0 },
+    { .file = "capture.mp3",   .offset = 0, .length = 0 },
+    { .file = "illegal.mp3",   .offset = 0, .length = 0 },
 };
 
 #include "build_src/nob_linux.c"
@@ -50,11 +56,13 @@ Asset assets[] = {
 bool bundle_assets()
 {
     Nob_String_Builder bundle = { 0 };
-    bool rebuild = true;
+    bool rebuild = false;
 
     for(int i = 0; i < NOB_ARRAY_LEN(assets); i++)
     {
-        rebuild = rebuild && nob_needs_rebuild1(BUNDLE_H_PATH, assets[i].file);
+        const char *path = nob_temp_sprintf("%s%s", ASSETS_DIR, assets[i].file);
+        if(nob_needs_rebuild(BUNDLE_H_PATH, &path, 1)) rebuild = true;
+        nob_temp_reset();
     }
 
     if(!rebuild) return true;
@@ -62,15 +70,18 @@ bool bundle_assets()
 
     for(int i = 0; i < NOB_ARRAY_LEN(assets); i++)
     {
+        char *path = nob_temp_sprintf("%s%s", ASSETS_DIR, assets[i].file);
         assets[i].offset = bundle.count;
-        nob_read_entire_file(assets[i].file, &bundle);
+        nob_read_entire_file(path, &bundle);
         assets[i].length = bundle.count - assets[i].offset;
+        nob_temp_reset();
     }
 
     Nob_String_View bundle_view = nob_sb_to_sv(bundle);
     Nob_String_Builder bundle_h_content = {0};
 
-    nob_sb_appendf(&bundle_h_content,  "typedef struct {\n\tchar *file;\n\tsize_t offset;\n\tsize_t length;\n} Asset;\n");
+    nob_sb_appendf(&bundle_h_content, "#include <stdint.h>\n");
+    nob_sb_appendf(&bundle_h_content, "typedef struct {\n\tchar *file;\n\tuint32_t offset;\n\tuint32_t length;\n} Asset;\n");
     nob_sb_appendf(&bundle_h_content, "Asset assets[] = {\n");
 
 

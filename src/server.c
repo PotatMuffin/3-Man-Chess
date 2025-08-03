@@ -223,7 +223,6 @@ void StartGame(Server *server, char *FEN)
             if(rc <= 0) 
             {
                 printf("client with fd %d disconnected\n", SocketFd(sock));
-                Close(server->clients[playerIndex]);
 
                 uint8_t colour = server->colour[playerIndex];
                 if(colour != server->board.eliminatedColour)
@@ -232,6 +231,7 @@ void StartGame(Server *server, char *FEN)
                     if(server->board.eliminatedPlayerCount > 1) return;
                 }
 
+                Close(server->clients[playerIndex]);
                 server->playerCount--;
                 server->clients[playerIndex] = server->clients[server->playerCount];
                 polls[i].sock                = server->clients[server->playerCount];

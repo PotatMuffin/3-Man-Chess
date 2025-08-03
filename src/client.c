@@ -5,6 +5,7 @@
 #include "./common/common.h"
 #include "raylib.h"
 #include "raymath.h"
+#include "../nob.h"
 
 #define BUNDLE_CONTENT
 #include "bundle.h"
@@ -41,6 +42,12 @@ char highlightedSquares[144];
 MoveList moveList = {0};
 Vector2 SquareCenterCoords[144];
 
+Sound moveSound;
+Sound castleSound;
+Sound promoteSound;
+Sound checkSound;
+Sound captureSound;
+
 void DrawBoard(Board *board, Texture2D spriteSheet);
 void InitSquareCenterCoords();
 void HandleInput(Board *board, Socket *sock);
@@ -48,6 +55,8 @@ void HighlightSquares(int square, MoveList *moveList);
 void HighlightSquare(int square);
 void ResetSquares();
 void DrawClock(Board *board);
+void PlayMoveAudio(Board *board, Move move);
+bool LoadAudio();
 int PollConnection(Socket *sock);
 int HandleServerMessage(Socket *sock, Board *board);
 void Send(int fd, Message *msg);
@@ -65,6 +74,9 @@ int main()
     ToggleFullscreen();
     SetTargetFPS(60);
     SetWindowMinSize(80, 80);
+
+    InitAudioDevice();
+    LoadAudio();
 
     int width = GetScreenWidth();
     int height = GetScreenHeight();
@@ -229,6 +241,7 @@ int main()
         EndDrawing();
     }
 
+    CloseAudioDevice();
     CleanupSockets();
     UnloadRenderTexture(target);
     CloseWindow();
@@ -474,6 +487,37 @@ void DrawClock(Board *board)
     }
 }
 
+void PlayMoveAudio(Board *board, Move move)
+{
+    if(ChecksEnemy(board, move))             PlaySound(checkSound);
+    else if(move.flag == CASTLE)             PlaySound(castleSound);
+    else if(move.flag == PROMOTETOBISHOP ||
+            move.flag == PROMOTETOKNIGHT ||
+            move.flag == PROMOTETOROOK   ||
+            move.flag == PROMOTETOQUEEN) PlaySound(promoteSound);
+    else if(board->map[move.target] != NONE) PlaySound(captureSound);
+    else PlaySound(moveSound);
+}
+
+bool LoadAudio()
+{
+    for(int i = 0; i < NOB_ARRAY_LEN(assets); i++)
+    {
+        char *name = assets[i].file;
+
+        Sound *Psound;
+        if     (strcmp(name, "move.mp3")    == 0) Psound = &moveSound;
+        else if(strcmp(name, "check.mp3")   == 0) Psound = &checkSound;
+        else if(strcmp(name, "promote.mp3") == 0) Psound = &promoteSound;
+        else if(strcmp(name, "castle.mp3")  == 0) Psound = &castleSound;
+        else if(strcmp(name, "capture.mp3") == 0) Psound = &captureSound;
+        else continue;
+    
+        Wave wave = LoadWaveFromMemory(GetFileExtension(assets[i].file), &bundle[assets[i].offset], assets[i].length);
+        *Psound = LoadSoundFromWave(wave);
+    }
+}
+
 // returns -1 upon error
 //          0 when still awaiting
 //          1 upon success 
@@ -518,6 +562,7 @@ int HandleServerMessage(Socket *sock, Board *board)
         SetClock(board, board->colourToMove, msg.movePlayed.clockTime);
         Move move = msg.playMove.move;
         ResetSquares();
+        PlayMoveAudio(board, move);
         MakeMove(board, move);
     }
     else if(msg.flag == ELIMINATED)

@@ -7,9 +7,10 @@
 #ifdef _WIN32
     #include <sysinfoapi.h>
     void __stdcall Sleep(unsigned long msTimeout);
+    BOOL WINAPI AllocConsole(void);
 #endif
 
-double target = 0;
+const double target = 1.0/60.0;;
 
 void Wait(double t);
 double GetTime();
@@ -224,14 +225,15 @@ void StartGame(Server *server, char *FEN)
                 printf("client with fd %d disconnected\n", SocketFd(sock));
                 Close(server->clients[playerIndex]);
 
+                bool mate2 = server->board.eliminatedColour != 0;
+                uint8_t colour = server->colour[playerIndex];
+                EliminatePlayer(server, colour);
+
                 server->playerCount--;
                 server->clients[playerIndex] = server->clients[server->playerCount];
                 polls[i].sock                = server->clients[server->playerCount];
                 server->colour[playerIndex]  = server->colour [server->playerCount];
-                if(server->board.eliminatedColour != 0) return;
-            
-                uint8_t colour = server->colour[playerIndex];
-                EliminatePlayer(server, colour);
+                if(mate2) return;
                 continue;
             }
             HandleMessage(server, playerIndex, &msg);
@@ -282,8 +284,11 @@ double GetTime()
 
 int main()
 {
+    #if defined(_WIN32)
+        AllocConsole();
+        freopen("CONOUT$", "w", stdout);
+    #endif
     InitSockets();
-    target = 1.0/60.0;
     Server server = {0};
     if(InitServer(&server) != 0) return 1;
     if(AwaitPlayers(&server) != 0) return 1;

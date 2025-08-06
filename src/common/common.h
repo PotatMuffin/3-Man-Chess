@@ -162,6 +162,7 @@ typedef struct {
     uint32_t revents;
 } PollFd;
 
+extern Move moves[144][8][24];
 
 inline uint8_t GetPieceType(uint8_t piece) { return piece & PIECEMASK; }
 inline uint8_t GetPieceColour(uint8_t piece) { return piece & COLOURMASK; }

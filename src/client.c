@@ -21,6 +21,17 @@
 #define WIDTH 1920
 #define HEIGHT 1080
 
+typedef struct {
+    Move move;
+    Vector2 position;
+    Vector2 path[24];
+    int     points;
+    int     index;
+    float   time;
+    uint8_t piece;
+    bool    isplaying;
+} Animation;
+
 const int rankSize = 60;
 const int pieceSize = 60;
 const int centerSize = 100;
@@ -57,11 +68,16 @@ Move lastMove = {0};
 
 Vector2 SquareCenterCoords[144];
 
+const double animationDuration = 0.25f;
+Animation _animation;
+
 Sound moveSound;
 Sound castleSound;
 Sound promoteSound;
 Sound checkSound;
 Sound captureSound;
+
+Texture2D spriteSheet;
 
 void UpdateGame(Board *board, Socket *sock, double deltaTime);
 void UpdateTextBox(char *text, int *length, int max);
@@ -69,12 +85,15 @@ void HandleInput(Board *board, Socket *sock);
 
 Vector2 GetMousePositionScaled();
 void InitSquareCenterCoords();
+void CreateAnimation(Animation *animation, Board *board, Move move);
+int AdjustForPerspective(int index);
 
 void HighlightSquares(int square, MoveList *moveList);
 void HighlightSquare(int square);
 void ResetSquares();
 void DrawClock(Board *board);
-void DrawBoard(Board *board, Texture2D spriteSheet);
+void DrawBoard(Board *board);
+void UpdateAnimation(Animation *animation, double deltaTime);
 
 int PollConnection(Socket *sock);
 int HandleServerMessage(Socket *sock, Board *board);
@@ -108,7 +127,7 @@ int main()
 
     InitSquareCenterCoords();
     Image pieces = LoadImageFromMemory(".png", &bundle[0], assets[0].length);
-    Texture2D spriteSheet = LoadTextureFromImage(pieces);
+    spriteSheet = LoadTextureFromImage(pieces);
 
     char ip[MAX_CHARS+1] = "\0";
     int charCount = 0;
@@ -155,13 +174,11 @@ int main()
         }
 
         BeginDrawing();
-
         BeginTextureMode(target);
         ClearBackground(BACKGROUND);
 
         if(gameState == YESGAME)
         {
-            UpdateClock(&board, deltaTime);
             DrawClock(&board);
         }
         else 
@@ -182,7 +199,9 @@ int main()
             DrawText(ip, textBox.x+5, textBox.y+8, 40, RL_MAROON);
         }
         DrawFPS(0, 0);
-        DrawBoard(&board, spriteSheet);
+
+        DrawBoard(&board);
+        UpdateAnimation(&_animation, deltaTime);
         EndTextureMode();
 
         DrawTexturePro(target.texture, (Rectangle){0, 0, target.texture.width, -target.texture.height}, (Rectangle){0, 0, width, height}, (Vector2){0,0}, 0, RL_WHITE);
@@ -246,13 +265,12 @@ void UpdateGame(Board *board, Socket *sock, double deltaTime)
 {
     if(gameState == YESGAME)
     {
+        UpdateClock(board, deltaTime);
         int res = HandleServerMessage(sock, board);
         if(res != 0) 
         {
             gameState = NOGAME;
             Close(sock);
-            sock = NULL;
-            
             InitBoard(board, DEFAULT_FEN);
         }
         HandleInput(board, sock);
@@ -264,6 +282,7 @@ void UpdateGame(Board *board, Socket *sock, double deltaTime)
         {
             if(connectTime >= 5.0f) 
             {
+                Close(sock);
                 gameState = CONNECTFAILED;
                 connectTime = 0.0f;
             }
@@ -276,6 +295,7 @@ void UpdateGame(Board *board, Socket *sock, double deltaTime)
         }
         else
         {
+            Close(sock);
             gameState = CONNECTFAILED;
             connectTime = 0.0f;
         }
@@ -399,7 +419,49 @@ inline void ResetSquares()
     }
 }
 
-void DrawBoard(Board *board, Texture2D spriteSheet)
+void DrawPiece(int piece, Vector2 position, float size)
+{
+    if (piece != 0)
+    {
+        Rectangle pieceSprite = {0, 0, 450.0f, 450.0f};
+        char pieceType = GetPieceType(piece);
+
+        switch (pieceType) {
+            case KING:
+                break;
+            case QUEEN:
+                pieceSprite.x = 450.0f;
+                break;
+            case BISHOP:
+                pieceSprite.x = 900.0f;
+                break;
+            case KNIGHT:
+                pieceSprite.x = 1350.0f;
+                break;
+            case ROOK:
+                pieceSprite.x = 1800.0f;
+                break;
+            case PAWN:
+            case PAWNCC:
+                pieceSprite.x = 2250.0f;
+                break;
+        }
+
+        char pieceColour = GetPieceColour(piece);
+        switch (pieceColour)
+        {
+            case WHITE: { pieceSprite.y = 0.0f;   break; };
+            case BLACK: { pieceSprite.y = 450.0f; break; };
+            case GRAY:  { pieceSprite.y = 900.0f; break; };
+        }
+
+        DrawTexturePro(spriteSheet, pieceSprite, 
+            (Rectangle){position.x, position.y, size, size}, 
+            (Vector2){size/2, size/2}, 0, RL_WHITE);
+    }
+}
+
+void DrawBoard(Board *board)
 {
     Vector2 center = {WIDTH/2, HEIGHT/2};
     DrawCircle(center.x, center.y, centerSize+rankSize*6+borderSize, BOARDBORDER);
@@ -451,54 +513,18 @@ void DrawBoard(Board *board, Texture2D spriteSheet)
 
     for(int square = 0; square < 144; square++)
     {
+        if(_animation.isplaying && square == _animation.move.target) continue;
         char piece = board->map[square];
-        if (piece != 0)
-        {
-            Rectangle pieceSprite = {0, 0, 450.0f, 450.0f};
-            char pieceType = GetPieceType(piece);
+        int rank = square / 24;
+        int file = square % 24;
+        float size = pieceSize - (20*(float)rank/5);
 
-            switch (pieceType) {
-                case KING:
-                    break;
-                case QUEEN:
-                    pieceSprite.x = 450.0f;
-                    break;
-                case BISHOP:
-                    pieceSprite.x = 900.0f;
-                    break;
-                case KNIGHT:
-                    pieceSprite.x = 1350.0f;
-                    break;
-                case ROOK:
-                    pieceSprite.x = 1800.0f;
-                    break;
-                case PAWN:
-                case PAWNCC:
-                    pieceSprite.x = 2250.0f;
-                    break;
-            }
+        int index = square;
+        if(perspective == BlackPerspective)     index = Right(index, 8);
+        else if(perspective == GrayPerspective) index = Left(index, 8);
 
-            char pieceColour = GetPieceColour(piece);
-            switch (pieceColour)
-            {
-                case WHITE: { pieceSprite.y = 0.0f;   break; };
-                case BLACK: { pieceSprite.y = 450.0f; break; };
-                case GRAY:  { pieceSprite.y = 900.0f; break; };
-            }
-
-            int rank = square / 24;
-            int file = square % 24;
-            float size = pieceSize - (20*(float)rank/5);
-
-            int index = square;
-            if(perspective == BlackPerspective)     index = Right(index, 8);
-            else if(perspective == GrayPerspective) index = Left(index, 8);
-
-            Vector2 position =  SquareCenterCoords[index];
-            DrawTexturePro(spriteSheet, pieceSprite, 
-                (Rectangle){position.x, position.y, size, size}, 
-                (Vector2){size/2, size/2}, 0, RL_WHITE);
-        }
+        Vector2 position = SquareCenterCoords[index];
+        DrawPiece(piece, position, size);
     }
 }
 
@@ -609,6 +635,7 @@ int HandleServerMessage(Socket *sock, Board *board)
         Move move = msg.playMove.move;
         ResetSquares();
         PlayMoveAudio(board, move);
+        CreateAnimation(&_animation, board, move);
         MakeMove(board, move);
         lastMove = move;
     }
@@ -620,4 +647,102 @@ int HandleServerMessage(Socket *sock, Board *board)
         if(board->colourToMove == colour) NextMove(board);
     }
     return 0;
+}
+
+void CreateAnimation(Animation *animation, Board *board, Move move)
+{
+    *animation = (Animation) { 0 };
+    animation->move = move;
+    int piece = board->map[move.start];
+    int pieceType = GetPieceType(piece);
+    animation->piece = piece;
+    animation->position = SquareCenterCoords[AdjustForPerspective(move.start)];
+    animation->isplaying = true;
+
+    if(pieceType != ROOK && pieceType != BISHOP && pieceType != QUEEN)
+    {
+        animation->path[0] = SquareCenterCoords[AdjustForPerspective(move.target)];
+        animation->path[1] = (Vector2) { 0 };
+        animation->points  = 1;
+    }
+    else 
+    {
+        int direction = -1;
+        int shortestDistance = 100;
+        for(int dir = 0; dir < 8; dir++)
+        {
+            for(int i = 0; i < 24; i++)
+            {
+                Move m = moves[move.start][dir][i];
+
+                if(m.target == move.target) 
+                {
+                    if(shortestDistance > i)
+                    {
+                        direction = dir;
+                        shortestDistance = i;
+                    }
+                }
+                if(board->map[m.target] != NONE) break;
+            }
+        }
+
+        if(direction == -1)
+        {
+            fprintf(stderr, "failed to generate animation\n");
+            animation->isplaying = false;
+            return;
+        }
+
+        int i = 0;
+        for(; i < 24; i++)
+        {
+            Move m = moves[move.start][direction][i];
+            animation->path[i] = SquareCenterCoords[AdjustForPerspective(m.target)];
+            if(m.target == move.target) break;
+        }
+        animation->points = i+1;
+    }
+}
+
+void UpdateAnimation(Animation *animation, double deltaTime)
+{
+    if(!animation->isplaying) return;
+    Move move = animation->move;
+
+    int targetRank   = move.target / 24;
+    float targetSize = pieceSize - (20*(float)targetRank/5);
+
+    animation->time += deltaTime;
+    float lerpAmount = animation->time / animationDuration;
+    lerpAmount *= (float)animation->points;
+    lerpAmount /= (float)animation->index+1.0f;
+    if(lerpAmount > 1.0f) lerpAmount = 1.0f;
+
+    Vector2 position = Vector2Lerp(animation->position, animation->path[animation->index], lerpAmount);
+    if(Vector2Equals(position, animation->path[animation->index]))
+    {
+        animation->position = position;
+        animation->index++;
+    }
+
+    if(animation->time >= animationDuration) 
+    {
+        animation->isplaying = false;
+        DrawPiece(animation->piece, position, targetSize);
+        return;
+    }
+
+    int startRank    = move.start  / 24;
+    float startSize  = pieceSize - (20*(float)startRank/5);
+    float size = Lerp(startSize, targetSize, lerpAmount);
+
+    DrawPiece(animation->piece, position, size);
+}
+
+int AdjustForPerspective(int index)
+{
+    if(perspective == BlackPerspective)     index = Right(index, 8);
+    else if(perspective == GrayPerspective) index = Left(index, 8);   
+    return index;
 }

@@ -117,7 +117,6 @@ bool build_server_linux()
     Nob_Cmd cmd = {0};
     Nob_File_Paths deps = {0};
     nob_da_append(&deps, SERVER_PATH);
-    nob_da_append(&deps, LIBRAYLIB_PATH);
     nob_da_append(&deps, COMMON_PATH);
 
     bool rebuild = nob_needs_rebuild(SERVER_OUTPUT_PATH, deps.items, deps.count);

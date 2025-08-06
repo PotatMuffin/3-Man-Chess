@@ -206,8 +206,8 @@ void StartGame(Server *server, char *FEN)
         UpdateClock(&server->board, deltaTime);
         if(FlaggedClock(&server->board)) 
         {
-            EliminatePlayer(server, server->board.colourToMove);
             if(server->board.eliminatedColour != 0) return;
+            EliminatePlayer(server, server->board.colourToMove);
         }
 
         int res = Poll(&polls[0], PLAYERS+1, 0);
@@ -294,8 +294,10 @@ int main()
     Server server = {0};
     if(InitServer(&server) != 0) return 1;
     if(AwaitPlayers(&server) != 0) return 1;
+
     StartGame(&server, DEFAULT_FEN);
     CloseServer(&server);
+    
     CleanupSockets();
     return 0;
 }

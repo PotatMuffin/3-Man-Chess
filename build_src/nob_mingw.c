@@ -121,6 +121,7 @@ bool build_server_mingw()
     nob_da_append(&deps, SERVER_PATH);
     nob_da_append(&deps, LIBRAYLIB_PATH);
     nob_da_append(&deps, COMMON_PATH);
+    nob_da_append(&deps, BUNDLE_H_PATH);
 
     bool rebuild = nob_needs_rebuild(SERVER_OUTPUT_PATH".exe", deps.items, deps.count);
     if (!rebuild) return true;

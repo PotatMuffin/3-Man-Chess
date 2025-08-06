@@ -14,6 +14,9 @@
 #define CLOCKBACKGROUND GetColor(0x202020FF)
 #define BOARDBORDER     GetColor(0x664a3eFF)
 
+#define SELECTLIGHT GetColor(0xDDD07CFF)
+#define SELECTDARK  GetColor(0xC59E5EFF)
+
 #define MAX_CHARS 16
 #define WIDTH 1920
 #define HEIGHT 1080
@@ -34,12 +37,24 @@ enum {
     GrayPerspective  = 2,
 };
 
+enum GameState {
+    NOGAME,
+    YESGAME,
+    CONNECTFAILED,
+    CONNECTING,
+};
+
+enum GameState gameState = NOGAME;
+double connectTime = 0.0f;
+
 uint8_t perspective = WhitePerspective;
 
 int selectedSquare = -1;
 char highlightedSquares[144];
 
 MoveList moveList = {0};
+Move lastMove = {0};
+
 Vector2 SquareCenterCoords[144];
 
 Sound moveSound;
@@ -48,18 +63,25 @@ Sound promoteSound;
 Sound checkSound;
 Sound captureSound;
 
-void DrawBoard(Board *board, Texture2D spriteSheet);
-void InitSquareCenterCoords();
+void UpdateGame(Board *board, Socket *sock, double deltaTime);
+void UpdateTextBox(char *text, int *length, int max);
 void HandleInput(Board *board, Socket *sock);
+
+Vector2 GetMousePositionScaled();
+void InitSquareCenterCoords();
+
 void HighlightSquares(int square, MoveList *moveList);
 void HighlightSquare(int square);
 void ResetSquares();
 void DrawClock(Board *board);
-void PlayMoveAudio(Board *board, Move move);
-bool LoadAudio();
+void DrawBoard(Board *board, Texture2D spriteSheet);
+
 int PollConnection(Socket *sock);
 int HandleServerMessage(Socket *sock, Board *board);
 void Send(int fd, Message *msg);
+
+bool LoadAudio();
+void PlayMoveAudio(Board *board, Move move);
 
 int main()
 {
@@ -90,15 +112,14 @@ int main()
 
     char ip[MAX_CHARS+1] = "\0";
     int charCount = 0;
-    bool GameInProgress = false;
-    bool connecting = false;
-    bool connectionFailed = false;
-    double connectTime = 0.0f;
     Socket *sock = NULL;
 
     while(!WindowShouldClose())
     {
-        BeginDrawing();
+        double deltaTime = GetFrameTime();
+        UpdateTextBox(&ip[0], &charCount, MAX_CHARS);
+        UpdateGame(&board, sock, deltaTime);
+
         if(IsWindowResized())
         {
             width = GetScreenWidth();
@@ -106,10 +127,6 @@ int main()
             scaleX = (float)width/WIDTH;
             scaleY = (float)height/HEIGHT;
         }
-
-        double deltaTime = GetFrameTime();
-        BeginTextureMode(target);
-        ClearBackground(BACKGROUND);
 
         if(IsKeyPressed(KEY_F11))
         {
@@ -124,108 +141,39 @@ int main()
             ToggleFullscreen();
         }
 
-        if(GameInProgress)
+        if(IsKeyPressed(KEY_ENTER) && charCount > 0)
+        {
+            if(gameState != CONNECTING && gameState != YESGAME)
+            {
+                sock = JoinGame(ip, PORT);
+                if(sock != NULL) 
+                {
+                    gameState = CONNECTING;
+                }
+                else gameState = CONNECTFAILED;
+            }
+        }
+
+        BeginDrawing();
+
+        BeginTextureMode(target);
+        ClearBackground(BACKGROUND);
+
+        if(gameState == YESGAME)
         {
             UpdateClock(&board, deltaTime);
             DrawClock(&board);
-
-            int res = HandleServerMessage(sock, &board);
-            if(res != 0) 
-            {
-                GameInProgress = false;
-                Close(sock);
-                sock = NULL;
-                
-                InitBoard(&board, DEFAULT_FEN);
-            }
-            HandleInput(&board, sock);
         }
         else 
         {
-            if(connecting)
+            if(gameState == CONNECTING)
             {
                 DrawText("Connecting...", 55, 115, 40, RL_MAROON);
-                int res = PollConnection(sock);
-                if(res == 0)
-                {
-                    if(connectTime >= 5.0f) 
-                    {
-                        connecting = false;
-                        connectionFailed = true;
-                        connectTime = 0.0f;
-                    }
-                    connectTime += deltaTime;
-                }
-                else if(res == 1)
-                {
-                    connecting = false;
-                    connectTime = 0.0f;
-                    GameInProgress = true;
-                }
-                else
-                {
-                    connecting = false;
-                    connectionFailed = true;
-                    connectTime = 0.0f;
-                }
+
             }
-            else if(connectionFailed)
+            else if(gameState == CONNECTFAILED)
             {
                 DrawText("Connection failed", 55, 115, 40, RL_MAROON);
-            }
-
-            int key = GetCharPressed();
-            if(IsKeyPressed(KEY_BACKSPACE) && charCount > 0)
-            {
-                charCount--;
-                ip[charCount] = '\0';
-            }
-
-            if(IsKeyPressed(KEY_ENTER) && charCount > 0)
-            {
-                if(!connecting)
-                {
-                    sock = JoinGame(ip, PORT);
-                    if(sock != NULL) 
-                    {
-                        connecting = true;
-                        connectionFailed = false;
-                    }
-                    else connectionFailed = true;
-                }
-            }
-
-            if(IsKeyDown(KEY_LEFT_CONTROL))
-            {
-                if(IsKeyPressed(KEY_V))
-                {
-                    const char *clipboard = GetClipboardText();  
-                    if(clipboard != NULL)
-                    {
-                        int len = strlen(clipboard);
-                        memcpy(ip, clipboard, MAX_CHARS);
-                        if(len > MAX_CHARS) ip[MAX_CHARS] = '\0';
-                        charCount = (len >= MAX_CHARS) ? MAX_CHARS : len;
-                    } 
-                }
-                else if(IsKeyPressed(KEY_C))
-                {
-                    SetClipboardText(ip);
-                }
-                else if(IsKeyPressed(KEY_BACKSPACE))
-                {
-                    ip[0] = '\0';
-                    charCount = 0;
-                }
-            }
-            while(key > 0)
-            {
-                if((key >= '0' && key <= '9' || key == '.') && charCount < MAX_CHARS)
-                {
-                    ip[charCount++] = (char)key;
-                    ip[charCount] = '\0';
-                }
-                key = GetCharPressed();
             }
 
             Rectangle textBox = { .x = 50, .y = 50, .width = 300, .height = 50};
@@ -248,15 +196,108 @@ int main()
     return 0;
 }
 
+void UpdateTextBox(char *text, int *length, int max)
+{
+    int charCount = *length;
+    int key = GetCharPressed();
+
+    if(IsKeyPressed(KEY_BACKSPACE) && charCount > 0)
+    {
+        charCount--;
+        text[charCount] = '\0';
+    }
+
+    if(IsKeyDown(KEY_LEFT_CONTROL))
+    {
+        if(IsKeyPressed(KEY_V))
+        {
+            const char *clipboard = GetClipboardText();  
+            if(clipboard != NULL)
+            {
+                int len = strlen(clipboard);
+                memcpy(text, clipboard, max);
+                if(len > max) text[max] = '\0';
+                charCount = (len >= max) ? max : len;
+            } 
+        }
+        else if(IsKeyPressed(KEY_C))
+        {
+            SetClipboardText(text);
+        }
+        else if(IsKeyPressed(KEY_BACKSPACE))
+        {
+            text[0] = '\0';
+            charCount = 0;
+        }
+    }
+    while(key > 0)
+    {
+        if((key >= '0' && key <= '9' || key == '.') && charCount < max)
+        {
+            text[charCount++] = (char)key;
+            text[charCount] = '\0';
+        }
+        key = GetCharPressed();
+    }
+    *length = charCount;
+}
+
+void UpdateGame(Board *board, Socket *sock, double deltaTime)
+{
+    if(gameState == YESGAME)
+    {
+        int res = HandleServerMessage(sock, board);
+        if(res != 0) 
+        {
+            gameState = NOGAME;
+            Close(sock);
+            sock = NULL;
+            
+            InitBoard(board, DEFAULT_FEN);
+        }
+        HandleInput(board, sock);
+    }
+    else if(gameState == CONNECTING) 
+    {
+        int res = PollConnection(sock);
+        if(res == 0)
+        {
+            if(connectTime >= 5.0f) 
+            {
+                gameState = CONNECTFAILED;
+                connectTime = 0.0f;
+            }
+            connectTime += deltaTime;
+        }
+        else if(res == 1)
+        {
+            connectTime = 0.0f;
+            gameState = YESGAME;
+        }
+        else
+        {
+            gameState = CONNECTFAILED;
+            connectTime = 0.0f;
+        }
+    }
+}
+
+Vector2 GetMousePositionScaled()
+{
+    Vector2 mousePos = GetMousePosition();
+    mousePos.x /= scaleX;
+    mousePos.y /= scaleY;
+    return mousePos;
+}
+
 void HandleInput(Board *board, Socket *sock)
 {
     if(IsMouseButtonPressed(MOUSE_LEFT_BUTTON))
     {
         Vector2 center = {WIDTH/2, HEIGHT/2};
 
-        Vector2 mousePos = GetMousePosition();
-        mousePos.x /= scaleX;
-        mousePos.y /= scaleY;
+        Vector2 mousePos = GetMousePositionScaled();
+
         float mouseDistance = Vector2Distance(mousePos, center);
         if(mouseDistance > boardRadius || mouseDistance < centerSize) return;
 
@@ -373,13 +414,17 @@ void DrawBoard(Board *board, Texture2D spriteSheet)
             Color colour = {0};
             if((i+j)%2)
             {
-                if (!highlightedSquares[index]) colour = GetColor(0xeed8c0FF);
-                else colour = GetColor(0xdd5959ff);
+                if(index == selectedSquare)          colour = SELECTLIGHT;
+                else if (highlightedSquares[index]) colour = GetColor(0xdd5959ff);
+                else if((index == lastMove.start || index == lastMove.target) && !IsNullMove(lastMove)) colour = SELECTLIGHT;
+                else colour = GetColor(0xeed8c0FF);
             }
             else 
             {
-                if(!highlightedSquares[index]) colour = GetColor(0xab7a65FF);
-                else colour = GetColor(0xc5444fff);
+                if(index == selectedSquare)         colour = SELECTDARK;
+                else if(highlightedSquares[index]) colour = GetColor(0xc5444fff);
+                else if((index == lastMove.start || index == lastMove.target) && !IsNullMove(lastMove)) colour = SELECTDARK;
+                else colour = GetColor(0xab7a65FF);
             }
 
             int radius = centerSize + (6-i) * rankSize;
@@ -515,6 +560,7 @@ bool LoadAudio()
     
         Wave wave = LoadWaveFromMemory(GetFileExtension(assets[i].file), &bundle[assets[i].offset], assets[i].length);
         *Psound = LoadSoundFromWave(wave);
+        printf("loaded %s\n", name);
     }
 }
 
@@ -564,6 +610,7 @@ int HandleServerMessage(Socket *sock, Board *board)
         ResetSquares();
         PlayMoveAudio(board, move);
         MakeMove(board, move);
+        lastMove = move;
     }
     else if(msg.flag == ELIMINATED)
     {

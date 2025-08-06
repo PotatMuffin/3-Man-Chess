@@ -708,7 +708,7 @@ bool CrossesCreek(Move move)
     int startSection = startFile / 8;
     int targetFile = move.target % 24;
     int targetSection = targetFile / 8;
-    return startRank < 4 && startSection != targetSection;
+    return startRank < 3 && startSection != targetSection;
 }
 
 bool blocksCheck(Move move)

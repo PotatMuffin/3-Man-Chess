@@ -92,6 +92,7 @@ bool build_client_linux()
     nob_da_append(&deps, CLIENT_PATH);
     nob_da_append(&deps, LIBRAYLIB_PATH);
     nob_da_append(&deps, COMMON_PATH);
+    nob_da_append(&deps, BUNDLE_H_PATH);
 
     bool rebuild = nob_needs_rebuild(CLIENT_OUTPUT_PATH, deps.items, deps.count);
     if (!rebuild) return true;

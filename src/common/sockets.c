@@ -144,6 +144,11 @@ int SocketFd(Socket *sock)
     return (int)sock->fd;
 }
 
+int Shutdown(Socket *sock)
+{
+    return shutdown(sock->fd, SD_BOTH);
+}
+
 void Close(Socket *sock)
 {
     closesocket(sock->fd);
@@ -246,13 +251,11 @@ int Poll(PollFd *Ppolls, int count, int timeout)
 
 int Read(Socket *sock, void *dest, int count)
 {
-    (struct Socket *)sock;
     return read(sock->fd, dest, count);
 }
 
 int Write(Socket *sock, void *src, int count)
 {
-    (struct Socket *)sock;
     return write(sock->fd, src, count);
 }
 
@@ -318,6 +321,11 @@ bool IsValidConnection(Socket *sock)
         return false;
     }
     return true;
+}
+
+int Shutdown(Socket *sock)
+{
+    return shutdown(sock->fd, SHUT_RDWR);
 }
 
 void Close(Socket *sock)

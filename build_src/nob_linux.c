@@ -52,11 +52,12 @@ bool build_common_linux()
 
     for(int i = 0; i < NOB_ARRAY_LEN(common_files); i++)
     {
-        char *source_file = nob_temp_sprintf("%s%s.c", SRC_DIR"common/",            common_files[i]);
+        char *source_file = nob_temp_sprintf("%s%s.c", COMMON_DIR,                  common_files[i]);
         char *object_file = nob_temp_sprintf("%s"PLATFORM_PREFIX"%s.o", BUILD_DIR,  common_files[i]);
         nob_da_append(&object_files, object_file);
 
         bool rebuild = nob_needs_rebuild1(object_file, source_file);
+        rebuild = rebuild || nob_needs_rebuild1(object_file, COMMON_H_PATH);
         if(!rebuild) continue;
 
         nob_cmd_append(&cmd, COMPILER, "-fPIC");

@@ -55,7 +55,6 @@ typedef struct {
     bool bridgedMoats[3];
     uint8_t colourToMove;
     uint8_t eliminatedColour;
-    uint8_t eliminatedPlayerCount;
     Clock clock;
 } Board;
 
@@ -83,6 +82,8 @@ enum MessageFlag {
     MOVEPLAYED,
     ELIMINATED,
     ENDOFGAME,
+    PING,
+    GAMEINPROGRESS,
 };
 
 enum EndFlag {
@@ -98,42 +99,44 @@ enum EndFlag {
 };
 
 struct GameStart {
-    uint16_t flag;
     uint8_t  colour;
-    TimeControl TimeControl;
+    TimeControl timeControl;
     char FEN[256];
 };
 
 struct PlayMove {
-    uint16_t flag;
     Move move;
 };
 
 struct MovePlayed {
-    uint16_t flag;
     Move move;
     double clockTime;
 };
 
 struct Eliminated {
-    uint16_t flag;
     uint8_t  colour;
     double clockTime;
 };
 
 struct EndOfGame {
-    uint16_t flag;
     uint8_t  winner; // 0 if its a draw, else its WHITE, GRAY, or BLACK depending on who won
     uint8_t  reason; // reason the game terminated, ( e.g. checkmate, stalemate, timeout )
 };
 
-typedef union {
+struct Ping {
+    uint32_t data;
+};
+
+typedef struct {
     uint16_t flag;
-    struct GameStart gameStart;
-    struct PlayMove playMove;
-    struct MovePlayed movePlayed;
-    struct Eliminated eliminated;
-    struct EndOfGame endOfGame;
+    union {
+        struct GameStart gameStart;
+        struct PlayMove playMove;
+        struct MovePlayed movePlayed;
+        struct Eliminated eliminated;
+        struct EndOfGame endOfGame;
+        struct Ping ping;
+    };
 } Message;
 
 typedef struct {
@@ -339,6 +342,7 @@ int Read(Socket *sock, void *dest, int count);
 int Write(Socket *sock, void *src, int count);
 bool IsValidConnection(Socket *sock);
 int SocketFd(Socket *sock);
+int Shutdown(Socket *sock);
 void Close(Socket *sock);
 
 #endif

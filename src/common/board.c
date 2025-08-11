@@ -165,7 +165,6 @@ void NextMove(Board *board)
 void EliminateColour(Board *board, uint8_t colour)
 {
     board->eliminatedColour = colour;
-    board->eliminatedPlayerCount++;
     int index = (colour >> 3)-1;
     board->bridgedMoats[index] = true;
     board->bridgedMoats[(index+1)%3] = true;

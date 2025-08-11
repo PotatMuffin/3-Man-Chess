@@ -9,12 +9,14 @@
 #define RAYLIB_BUILD_DIR BUILD_DIR"raylib/"
 #define LIBRAYLIB_A "libraylib.a"
 #define SRC_DIR "./src/"
+#define COMMON_DIR SRC_DIR"common/"
 #define CLIENT_PATH SRC_DIR"client.c"
 #define SERVER_PATH SRC_DIR"server.c"
 #define COMMON_A "common.a" 
 #define ASSETS_DIR "./assets/"
 #define BUNDLE_H_PATH BUILD_DIR"bundle.h"
 #define SHIP_DIR "./ship/"
+#define COMMON_H_PATH COMMON_DIR"common.h"
 
 typedef struct {
     char   *file;

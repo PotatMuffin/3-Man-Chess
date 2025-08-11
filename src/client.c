@@ -51,8 +51,10 @@ enum {
 enum GameState {
     NOGAME,
     YESGAME,
+    GAMEOVER,
     CONNECTFAILED,
     CONNECTING,
+    GAMEALREADYSTARTED,
 };
 
 enum GameState gameState = NOGAME;
@@ -192,6 +194,10 @@ int main()
             {
                 DrawText("Connection failed", 55, 115, 40, RL_MAROON);
             }
+            else if(gameState == GAMEALREADYSTARTED)
+            {
+                DrawText("Game already started", 55, 115, 40, RL_MAROON);
+            }
 
             Rectangle textBox = { .x = 50, .y = 50, .width = 300, .height = 50};
             DrawRectangleRec(textBox, RL_LIGHTGRAY);
@@ -271,6 +277,7 @@ void UpdateGame(Board *board, Socket *sock, double deltaTime)
         {
             gameState = NOGAME;
             Close(sock);
+            lastMove = (Move){ 0 };
             InitBoard(board, DEFAULT_FEN);
         }
         HandleInput(board, sock);
@@ -586,7 +593,6 @@ bool LoadAudio()
     
         Wave wave = LoadWaveFromMemory(GetFileExtension(assets[i].file), &bundle[assets[i].offset], assets[i].length);
         *Psound = LoadSoundFromWave(wave);
-        printf("loaded %s\n", name);
     }
 }
 
@@ -610,7 +616,7 @@ int PollConnection(Socket *sock)
 
 int HandleServerMessage(Socket *sock, Board *board)
 {
-    PollFd poll = { .sock = sock, .events = PollRead, .revents = 0};
+    PollFd poll = { .sock = sock, .events = PollRead, .revents = 0 };
 
     int count = Poll(&poll, 1, 0);
     if(count == 0) return 0;
@@ -626,7 +632,7 @@ int HandleServerMessage(Socket *sock, Board *board)
         printf("Starting game with fen:\n%s\nand colour: %d\n", msg.gameStart.FEN, msg.gameStart.colour);
         perspective = (msg.gameStart.colour >> 3) - 1;
         InitBoard(board, msg.gameStart.FEN);
-        InitClock(board, msg.gameStart.TimeControl);
+        InitClock(board, msg.gameStart.timeControl);
     }
     else if(msg.flag == MOVEPLAYED)
     {
@@ -645,6 +651,21 @@ int HandleServerMessage(Socket *sock, Board *board)
         SetClock(board, colour, msg.eliminated.clockTime);
         EliminateColour(board, colour);
         if(board->colourToMove == colour) NextMove(board);
+    }
+    else if(msg.flag == ENDOFGAME)
+    {
+        printf("game ended!\nreason: %d\nwinner: %d\n", msg.endOfGame.reason, msg.endOfGame.winner);
+    }
+    else if(msg.flag == PING)
+    {
+        Message response = { 0 };
+        response.flag = PING;
+        response.ping.data = msg.ping.data;
+        Write(sock, &response, sizeof(Message));
+    }
+    else if(msg.flag == GAMEINPROGRESS)
+    {
+        gameState = GAMEALREADYSTARTED;
     }
     return 0;
 }

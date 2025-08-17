@@ -14,6 +14,8 @@
 #define CLOCKBACKGROUND GetColor(0x202020FF)
 #define BOARDBORDER     GetColor(0x664a3eFF)
 
+#define NORMALLIGHT GetColor(0xdd5959ff)
+#define NORMALDARK  GetColor(0xc5444fff)
 #define SELECTLIGHT GetColor(0xDDD07CFF)
 #define SELECTDARK  GetColor(0xC59E5EFF)
 
@@ -32,11 +34,66 @@ typedef struct {
     bool    isplaying;
 } Animation;
 
-const int rankSize = 60;
-const int pieceSize = 60;
-const int centerSize = 100;
-const int borderSize = rankSize/3;
-const int boardRadius = centerSize+rankSize*6;
+typedef struct {
+    Rectangle bounds;
+    char     *normalText;
+    char     *toggleText;
+    float     fontSize;
+    Color     bgColour;
+    Color     fgColour;
+    bool      active;
+    bool      toggled;
+} Button;
+
+static const int rankSize = 60;
+static const int pieceSize = 60;
+static const int centerSize = 100;
+static const int borderSize = rankSize/3;
+static const int boardRadius = centerSize+rankSize*6;
+static const Vector2 center = {WIDTH/2, HEIGHT/2};
+
+static const Vector2   gameOverBoxSize = { 300, 150 }; 
+static const Rectangle gameOverBox = { .x = center.x - gameOverBoxSize.x / 2, .y = center.y - gameOverBoxSize.y / 2, .width = gameOverBoxSize.x, .height = gameOverBoxSize.y };
+static const int gameOverButtonPadding = 10;
+static const int gameOverButtonHeight = 50;
+static const int gameOverButtonWidth = gameOverBox.width / 2 - (float)gameOverButtonPadding * 1.5f;
+
+enum Button {
+    BUTTONREMATCH,
+    BUTTONEXIT,
+    BUTTONRESIGN,
+};
+
+// this is probably a bad way to do this
+// but there aren't many buttons so I don't care
+static Button buttons[] = {
+    [BUTTONREMATCH] = { 
+        .bounds = {
+            .x = gameOverBox.x + gameOverButtonPadding,
+            .y = gameOverBox.y + gameOverBox.height - gameOverButtonPadding - gameOverButtonHeight,
+            .height = gameOverButtonHeight,
+            .width  = gameOverButtonWidth,
+        },  
+        .normalText = "rematch",
+        .toggleText = "X rematch",
+        .bgColour = {0x81, 0xB6, 0x4C, 0xFF},
+        .fgColour = RL_WHITE,
+        .fontSize = 24.0f,
+    },
+    [BUTTONEXIT] = {
+        .bounds = {
+            .x = gameOverBox.x + gameOverBox.width - gameOverButtonWidth - gameOverButtonPadding,
+            .y = gameOverBox.y + gameOverBox.height - gameOverButtonPadding - gameOverButtonHeight,
+            .height = gameOverButtonHeight,
+            .width  = gameOverButtonWidth,
+        },
+        .normalText = "exit",
+        .bgColour = {0x81, 0xB6, 0x4C, 0xFF},
+        .fgColour = RL_WHITE,
+        .fontSize = 24.0f,
+    },
+};
+
 float scaleX = 0;
 float scaleY = 0;
 
@@ -57,7 +114,9 @@ enum GameState {
     GAMEALREADYSTARTED,
 };
 
-enum GameState gameState = NOGAME;
+enum GameState gameState  = NOGAME;
+enum EndFlag   endReason  = NONE;
+int            gameWinner = -1;
 double connectTime = 0.0f;
 
 uint8_t perspective = WhitePerspective;
@@ -70,7 +129,7 @@ Move lastMove = {0};
 
 Vector2 SquareCenterCoords[144];
 
-const double animationDuration = 0.25f;
+const double animationDuration = 0.1f;
 Animation _animation;
 
 Sound moveSound;
@@ -81,9 +140,14 @@ Sound captureSound;
 
 Texture2D spriteSheet;
 
-void UpdateGame(Board *board, Socket *sock, double deltaTime);
+Font font;
+
+Socket *sock = NULL;
+
+void UpdateGame(Board *board, double deltaTime);
 void UpdateTextBox(char *text, int *length, int max);
-void HandleInput(Board *board, Socket *sock);
+void UpdateButtons(Board *board);
+void HandleInput(Board *board);
 
 Vector2 GetMousePositionScaled();
 void InitSquareCenterCoords();
@@ -95,10 +159,12 @@ void HighlightSquare(int square);
 void ResetSquares();
 void DrawClock(Board *board);
 void DrawBoard(Board *board);
+void DrawEndScreen();
+void DrawButton(enum Button buttonIndex);
 void UpdateAnimation(Animation *animation, double deltaTime);
 
-int PollConnection(Socket *sock);
-int HandleServerMessage(Socket *sock, Board *board);
+int PollConnection();
+int HandleServerMessage(Board *board);
 void Send(int fd, Message *msg);
 
 bool LoadAudio();
@@ -131,15 +197,22 @@ int main()
     Image pieces = LoadImageFromMemory(".png", &bundle[0], assets[0].length);
     spriteSheet = LoadTextureFromImage(pieces);
 
+    font = GetFontDefault();
+
     char ip[MAX_CHARS+1] = "\0";
     int charCount = 0;
-    Socket *sock = NULL;
 
     while(!WindowShouldClose())
     {
         double deltaTime = GetFrameTime();
         UpdateTextBox(&ip[0], &charCount, MAX_CHARS);
-        UpdateGame(&board, sock, deltaTime);
+        UpdateGame(&board, deltaTime);
+
+        buttons[BUTTONREMATCH].active = gameState == GAMEOVER;
+        buttons[BUTTONEXIT].active    = gameState == GAMEOVER;
+        buttons[BUTTONRESIGN].active  = gameState == YESGAME;
+
+        UpdateButtons(&board);
 
         if(IsWindowResized())
         {
@@ -179,9 +252,17 @@ int main()
         BeginTextureMode(target);
         ClearBackground(BACKGROUND);
 
+        DrawBoard(&board);
+        UpdateAnimation(&_animation, deltaTime);
+
         if(gameState == YESGAME)
         {
             DrawClock(&board);
+        }
+        else if(gameState == GAMEOVER)
+        {
+            DrawClock(&board);
+            DrawEndScreen();
         }
         else 
         {
@@ -205,14 +286,16 @@ int main()
             DrawText(ip, textBox.x+5, textBox.y+8, 40, RL_MAROON);
         }
         DrawFPS(0, 0);
-
-        DrawBoard(&board);
-        UpdateAnimation(&_animation, deltaTime);
         EndTextureMode();
 
         DrawTexturePro(target.texture, (Rectangle){0, 0, target.texture.width, -target.texture.height}, (Rectangle){0, 0, width, height}, (Vector2){0,0}, 0, RL_WHITE);
         EndDrawing();
     }
+
+    msg.flag = GOODBYE;
+    Write(sock, &msg, sizeof(msg));
+    Shutdown(sock);
+    Close(sock);
 
     CloseAudioDevice();
     CleanupSockets();
@@ -267,22 +350,9 @@ void UpdateTextBox(char *text, int *length, int max)
     *length = charCount;
 }
 
-void UpdateGame(Board *board, Socket *sock, double deltaTime)
+void UpdateGame(Board *board, double deltaTime)
 {
-    if(gameState == YESGAME)
-    {
-        UpdateClock(board, deltaTime);
-        int res = HandleServerMessage(sock, board);
-        if(res != 0) 
-        {
-            gameState = NOGAME;
-            Close(sock);
-            lastMove = (Move){ 0 };
-            InitBoard(board, DEFAULT_FEN);
-        }
-        HandleInput(board, sock);
-    }
-    else if(gameState == CONNECTING) 
+    if(gameState == CONNECTING) 
     {
         int res = PollConnection(sock);
         if(res == 0)
@@ -290,6 +360,7 @@ void UpdateGame(Board *board, Socket *sock, double deltaTime)
             if(connectTime >= 5.0f) 
             {
                 Close(sock);
+                sock = NULL;
                 gameState = CONNECTFAILED;
                 connectTime = 0.0f;
             }
@@ -299,13 +370,34 @@ void UpdateGame(Board *board, Socket *sock, double deltaTime)
         {
             connectTime = 0.0f;
             gameState = YESGAME;
+            endReason  = NONE;
+            gameWinner = -1;
         }
         else
         {
             Close(sock);
+            sock = NULL;
             gameState = CONNECTFAILED;
             connectTime = 0.0f;
         }
+        return;
+    }
+
+    if(sock == NULL) return;
+    int res = HandleServerMessage(board);
+    if(res != 0)
+    {
+        gameState = NOGAME;
+        lastMove = (Move){ 0 };
+        InitBoard(board, DEFAULT_FEN);
+        Close(sock);
+        sock = NULL;
+    }
+
+    if(gameState == YESGAME)
+    {
+        UpdateClock(board, deltaTime);
+        HandleInput(board);
     }
 }
 
@@ -317,7 +409,7 @@ Vector2 GetMousePositionScaled()
     return mousePos;
 }
 
-void HandleInput(Board *board, Socket *sock)
+void HandleInput(Board *board)
 {
     if(IsMouseButtonPressed(MOUSE_LEFT_BUTTON))
     {
@@ -380,6 +472,37 @@ void HandleInput(Board *board, Socket *sock)
             Write(sock, &msg, sizeof(msg));
             // MakeMove(board, chosenMove);
         }
+    }
+}
+
+void UpdateButtons(Board *board)
+{
+    if(!IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) return;
+    for(int i = 0; i < NOB_ARRAY_LEN(buttons); i++)
+    {
+        if(!buttons[i].active) continue;
+        Vector2 mousePos = GetMousePositionScaled();
+        if(!CheckCollisionPointRec(mousePos, buttons[i].bounds)) continue;
+
+        switch(i)
+        {
+            case BUTTONREMATCH: {
+                buttons[i].toggled = !buttons[i].toggled;
+                msg.flag = REMATCH;
+                msg.rematch.agree = buttons[i].toggled;
+                Write(sock, &msg, sizeof(msg));
+            }; break;
+            case BUTTONEXIT: {
+                gameState = NOGAME;
+                InitBoard(board, DEFAULT_FEN);
+                msg.flag = GOODBYE;
+                Write(sock, &msg, sizeof(msg));
+                Shutdown(sock);
+                Close(sock);
+                sock = NULL;
+            }; break;
+        }
+        break;
     }
 }
 
@@ -470,7 +593,6 @@ void DrawPiece(int piece, Vector2 position, float size)
 
 void DrawBoard(Board *board)
 {
-    Vector2 center = {WIDTH/2, HEIGHT/2};
     DrawCircle(center.x, center.y, centerSize+rankSize*6+borderSize, BOARDBORDER);
 
     for(int i = 0; i < 6; i++)
@@ -484,14 +606,14 @@ void DrawBoard(Board *board)
             if((i+j)%2)
             {
                 if(index == selectedSquare)          colour = SELECTLIGHT;
-                else if (highlightedSquares[index]) colour = GetColor(0xdd5959ff);
+                else if (highlightedSquares[index])  colour = NORMALLIGHT;
                 else if((index == lastMove.start || index == lastMove.target) && !IsNullMove(lastMove)) colour = SELECTLIGHT;
                 else colour = GetColor(0xeed8c0FF);
             }
             else 
             {
                 if(index == selectedSquare)         colour = SELECTDARK;
-                else if(highlightedSquares[index]) colour = GetColor(0xc5444fff);
+                else if(highlightedSquares[index])  colour = NORMALDARK;
                 else if((index == lastMove.start || index == lastMove.target) && !IsNullMove(lastMove)) colour = SELECTDARK;
                 else colour = GetColor(0xab7a65FF);
             }
@@ -548,7 +670,7 @@ void DrawClock(Board *board)
         int index = (i + perspective) % 3;
         Color colour = CLOCKBACKGROUND;
         Rectangle ClockBox = clockBoxes[i];
-        DrawRectangleRec(ClockBox, colour);
+        DrawRectangleRounded(ClockBox, 0.1f, 0, colour);
 
         double time = board->clock.seconds[index];
         int minutes = (int)time/60;
@@ -563,6 +685,42 @@ void DrawClock(Board *board)
         Color textColour = (flagged) ? RL_RED : RL_WHITE;
         DrawText(clockText, ClockBox.x+textOffset, ClockBox.y+15, 80, textColour);
     }
+}
+
+void DrawButton(enum Button buttonIndex)
+{
+    Button button = buttons[buttonIndex];
+    char *text = button.toggled ? button.toggleText : button.normalText;
+    DrawRectangleRounded(button.bounds, 0.1f, 0, button.bgColour);
+    Vector2 textSize = MeasureTextEx(font, text, button.fontSize, button.fontSize / 10.0f);
+    Vector2 textPos = { (button.bounds.width - textSize.x) / 2, (button.bounds.height - textSize.y) / 2 }; 
+    DrawText(text, button.bounds.x + textPos.x, button.bounds.y + textPos.y, button.fontSize, button.fgColour);
+}
+
+void DrawEndScreen()
+{
+    DrawRectangleRounded(gameOverBox, 0.1f, 0, GetColor(0x3C3A38FF));
+
+    static const int headerOffset = 20;
+    const char *header = (gameWinner == 0) ? "Draw!" : TextFormat("%s won!", GetColourString(gameWinner));
+    static const float headerFontSize = 30;
+    static const float headerSpacing  = headerFontSize / 10.0f;
+    Vector2 headerSize = MeasureTextEx(font, header, headerFontSize, headerSpacing);
+
+    Vector2 headerPos = { (gameOverBoxSize.x - headerSize.x) / 2, headerOffset };
+    DrawText(header, gameOverBox.x + headerPos.x, gameOverBox.y + headerPos.y, headerFontSize, RL_WHITE);
+
+    static const int footerOffset = 5;
+    const char *footer = TextFormat("by %s", EndFlagString[endReason]);
+    static const float footerFontSize = 20;
+    static const float footerSpacing = footerFontSize / 10.0f;
+    Vector2 footerSize = MeasureTextEx(font, footer, footerFontSize, footerSpacing);
+
+    Vector2 footerPos = { (gameOverBoxSize.x - footerSize.x) / 2, footerOffset + headerOffset + headerSize.y};
+    DrawText(footer, gameOverBox.x + footerPos.x, gameOverBox.y + footerPos.y, footerFontSize, RL_WHITE);
+
+    DrawButton(BUTTONREMATCH);
+    DrawButton(BUTTONEXIT);
 }
 
 void PlayMoveAudio(Board *board, Move move)
@@ -599,7 +757,7 @@ bool LoadAudio()
 // returns -1 upon error
 //          0 when still awaiting
 //          1 upon success 
-int PollConnection(Socket *sock)
+int PollConnection()
 {
     PollFd poll = { .sock = sock, .events = PollWrite, .revents = 0 };
 
@@ -614,7 +772,7 @@ int PollConnection(Socket *sock)
     return 1;
 }
 
-int HandleServerMessage(Socket *sock, Board *board)
+int HandleServerMessage(Board *board)
 {
     PollFd poll = { .sock = sock, .events = PollRead, .revents = 0 };
 
@@ -629,6 +787,8 @@ int HandleServerMessage(Socket *sock, Board *board)
 
     if(msg.flag == GAMESTART)
     {
+        gameState = YESGAME;
+        buttons[BUTTONREMATCH].toggled = false;
         printf("Starting game with fen:\n%s\nand colour: %d\n", msg.gameStart.FEN, msg.gameStart.colour);
         perspective = (msg.gameStart.colour >> 3) - 1;
         InitBoard(board, msg.gameStart.FEN);
@@ -654,6 +814,11 @@ int HandleServerMessage(Socket *sock, Board *board)
     }
     else if(msg.flag == ENDOFGAME)
     {
+        gameState = GAMEOVER;
+        endReason = msg.endOfGame.reason;
+        gameWinner = msg.endOfGame.winner;
+        lastMove = (Move){ 0 };
+
         printf("game ended!\nreason: %d\nwinner: %d\n", msg.endOfGame.reason, msg.endOfGame.winner);
     }
     else if(msg.flag == PING)

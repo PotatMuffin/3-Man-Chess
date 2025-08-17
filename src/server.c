@@ -19,6 +19,8 @@ typedef struct {
     int colour[3];
     int playerCount;
     int eliminatedPlayerCount;
+    bool eliminated[3];
+    bool rematch[3];
 } Server;
 
 typedef enum {
@@ -36,8 +38,6 @@ uint32_t pingData = 0;
 
 GameState gameState = NOGAME;
 MoveList legalMoves = {0};
-bool movePlayed = false;
-bool playerDisconnected = false;
 
 void Wait(double t);
 double GetTime();
@@ -45,6 +45,7 @@ int InitServer(Server *server);
 int AwaitPlayers(Server *server);
 void CloseServer(Server *server);
 void HandlePlayerMessage(Server *server, int *disconnectedIndices, int *PdisconnectedCount);
+int GetWinner(Server *server);
 
 void Broadcast(Server *server, Message *msg)
 {
@@ -106,13 +107,14 @@ void EliminatePlayer(Server *server, int playerIndex)
     msg.flag = ELIMINATED;
     Broadcast(server, &msg);
     if(server->board.colourToMove == colour) NextMove(&server->board);
+    server->eliminated[playerIndex] = true;
     server->eliminatedPlayerCount++;
 }
 
 void HandlePlayerMessage(Server *server, int *disconnectedIndices, int *PdisconnectedCount)
 {
     Message response = {0};
-    Message message  = {0};
+    Message msg  = {0};
 
     int disconnectedCount = *PdisconnectedCount;
 
@@ -126,11 +128,13 @@ void HandlePlayerMessage(Server *server, int *disconnectedIndices, int *Pdisconn
 
         if(i == 0) 
         {
-            if(gameState != YESGAME) continue;
-            Socket *clientSock = Accept(server->serverSock);
-            response.flag = GAMEINPROGRESS;
-            Write(clientSock, &response, sizeof(response));
-            Close(clientSock);
+            if(gameState == YESGAME || (gameState == AWAITINGREMATCH && server->playerCount == 3))
+            {
+                Socket *clientSock = Accept(server->serverSock);
+                response.flag = GAMEINPROGRESS;
+                Write(clientSock, &response, sizeof(response));
+                Close(clientSock);
+            }
             continue;
         }
 
@@ -139,14 +143,14 @@ void HandlePlayerMessage(Server *server, int *disconnectedIndices, int *Pdisconn
         uint8_t colour = server->colour[playerIndex]; 
         int colourIndex = colour / 8 - 1;
 
-        int rc = Read(sock, &message, sizeof(message));
+        int rc = Read(sock, &msg, sizeof(msg));
         if(rc <= 0)
         {
             disconnectedIndices[disconnectedCount++] = i;
             continue;
         }
 
-        switch(message.flag)
+        switch(msg.flag)
         {
             case PLAYMOVE: {
                 if(gameState != YESGAME) break;
@@ -157,7 +161,7 @@ void HandlePlayerMessage(Server *server, int *disconnectedIndices, int *Pdisconn
                     return;
                 }
 
-                Move playedMove = message.playMove.move;
+                Move playedMove = msg.playMove.move;
                 bool isLegal = false;
                 for(int i = 0; i < legalMoves.count; i++)
                 {
@@ -177,14 +181,22 @@ void HandlePlayerMessage(Server *server, int *disconnectedIndices, int *Pdisconn
                     response.movePlayed.move = playedMove;
                     response.movePlayed.clockTime = server->board.clock.seconds[colourIndex];
                     Broadcast(server, &response);
-                    movePlayed = true;
                 }
             }; break;
             case PING: {
-                if(message.ping.data == pingData)
+                if(msg.ping.data == pingData)
                 {
                     pingResponses[playerIndex] = true;
                 }
+            }; break;
+            case REMATCH: {
+                if(gameState == AWAITINGREMATCH)
+                {
+                    server->rematch[playerIndex] = msg.rematch.agree;
+                }
+            }; break;
+            case GOODBYE: {
+                disconnectedIndices[disconnectedCount++] = i;
             }; break;
         }
     }
@@ -209,7 +221,6 @@ void HandleDisconnect(Server *server, int *Pindex, int count)
         Close(server->clients[playerIndex]);
         server->clients[playerIndex] = NULL;
         server->playerCount--;
-        playerDisconnected = true;
     }
 
     if(oldPlayerCount == server->playerCount) return;
@@ -232,10 +243,12 @@ void HandleDisconnect(Server *server, int *Pindex, int count)
 
     if(playerIndexToReplace == -1 || playerIndexToMove == -1) return;
 
-    polls[playerIndexToReplace+1].sock    = server->clients[playerIndexToMove];
-    server->clients[playerIndexToReplace] = server->clients[playerIndexToMove];
-    server->colour[playerIndexToReplace]  = server->colour [playerIndexToMove];
-    pingResponses[playerIndexToReplace]   = pingResponses  [playerIndexToMove];
+    polls[playerIndexToReplace+1].sock       = server->clients[playerIndexToMove];
+    server->clients[playerIndexToReplace]    = server->clients[playerIndexToMove];
+    server->colour[playerIndexToReplace]     = server->colour[playerIndexToMove];
+    pingResponses[playerIndexToReplace]      = pingResponses[playerIndexToMove];
+    server->rematch[playerIndexToReplace]    = server->rematch[playerIndexToMove];
+    server->eliminated[playerIndexToReplace] = server->eliminated[playerIndexToMove];
 }
 
 int InitServer(Server *server)
@@ -277,6 +290,7 @@ int AwaitPlayers(Server *server)
     if((polls[0].revents & polls[0].events) != 0)
     {
         pingResponses[server->playerCount] = true;
+        server->rematch[server->playerCount] = true;
         Socket *clientSock = Accept(server->serverSock);
         server->clients[server->playerCount++] = clientSock;
         printf("client joined with fd %d\n", SocketFd(clientSock));
@@ -288,6 +302,7 @@ int AwaitPlayers(Server *server)
 
 void StartGame(Server *server, char *FEN)
 {
+    server->eliminatedPlayerCount = 0;
     TimeControl timeControl = { .minutes = 10, .increment = 10 };
     Message msg = {0};
     msg.flag = GAMESTART;
@@ -314,32 +329,45 @@ void StartGame(Server *server, char *FEN)
     InitClock(&server->board, timeControl);
 
     GenerateMoves(&server->board, &legalMoves);
+
+    for(int i = 0; i < 3; i++) server->rematch[i]    = false;
+    for(int i = 0; i < 3; i++) server->eliminated[i] = false;
+    gameState = YESGAME;
 }
 
 bool UpdateGame(Server *server, double deltaTime, struct EndOfGame *gameEnd)
 {
     static int playerIndex = -1;
+    static int playingColour = -1;
     int endReason = -1;
     bool isDraw = false;
+    bool turnEnded = false;
 
-    if(playerIndex == -1 || movePlayed || playerDisconnected)
+    if(playerIndex == -1 || playingColour != server->board.colourToMove)
     {
+        turnEnded = true;
         for(int i = 0; i < server->playerCount; i++) 
         {
             if(server->colour[i] == server->board.colourToMove)
             {
                 playerIndex = i;
+                playingColour = server->colour[playerIndex];
                 break;
             }
         }
     }
 
-    if(movePlayed || playerDisconnected)
+    if(turnEnded)
     {
+        if((server->board.fiftyMoveClock / 3) >= 50)
+        {
+            endReason = FIFTYRULE;
+            isDraw = true;
+        }
+
         GenerateMoves(&server->board, &legalMoves);
         if(legalMoves.count == 0)
         {
-            printf("server->board.eliminatedColour = %d\n", server->board.eliminatedColour);
             if(server->eliminatedPlayerCount == 0) 
             {
                 EliminatePlayer(server, playerIndex);
@@ -360,9 +388,6 @@ bool UpdateGame(Server *server, double deltaTime, struct EndOfGame *gameEnd)
             }
         }
     }
-
-    movePlayed = false;
-    playerDisconnected = false;
 
     UpdateClock(&server->board, deltaTime);
     if(FlaggedClock(&server->board)) 
@@ -390,6 +415,7 @@ bool UpdateGame(Server *server, double deltaTime, struct EndOfGame *gameEnd)
 
     if(server->eliminatedPlayerCount > 1 || isDraw)
     {
+        gameEnd->winner = GetWinner(server);
         gameEnd->reason = endReason;
         return false;
     }
@@ -397,10 +423,21 @@ bool UpdateGame(Server *server, double deltaTime, struct EndOfGame *gameEnd)
     return true;
 }
 
+int GetWinner(Server *server)
+{
+    if(server->eliminatedPlayerCount != 2) return 0;
+    for(int i = 0; i < server->playerCount; i++)
+    {
+        if(!server->eliminated[i]) return server->colour[i];
+    }
+    return -1;
+}
+
 void CloseServer(Server *server)
 {
     for(int i = 0; i < server->playerCount; i++)
     {
+        Shutdown(server->clients[i]);
         Close(server->clients[i]);
     }
     Shutdown(server->serverSock);
@@ -459,34 +496,51 @@ int main()
         prevFrameStart = start;
         timer += deltaTime;
 
+        int disconnectedIndices[3] = { 0 };
+        int disconnectedCount = 0;
+
         if(gameState == NOGAME)
         {
             int res = AwaitPlayers(&server);
-            if(res == -1) 
-            {
-                printf("%d\n", server.playerCount);
-                break;
-            }
+            if(res == -1) break;
             if(res == 1) 
             {
                 StartGame(&server, DEFAULT_FEN);
-
-                movePlayed = false;
-                playerDisconnected = false;
-
-                gameState = YESGAME;
             }
         }
         else if(gameState == YESGAME)
         {
             if(!UpdateGame(&server, deltaTime, &gameEnd)) 
             {
-                gameState = NOGAME;
+                printf("game has ended!!\nreason: %s, winner: %s\n", EndFlagString[gameEnd.reason], GetColourString(gameEnd.winner));
+                gameState = AWAITINGREMATCH;
 
                 message.flag = ENDOFGAME;
                 message.endOfGame = gameEnd;
                 Broadcast(&server, &message);
-                break;
+            }
+        }
+        else if(gameState == AWAITINGREMATCH)
+        {
+            if(server.playerCount < 3)
+            {
+                AwaitPlayers(&server);
+            }
+            else 
+            {
+                HandlePlayerMessage(&server, &disconnectedIndices[0], &disconnectedCount);
+                Ping(&server, &disconnectedIndices[0], &disconnectedCount);
+                HandleDisconnect(&server, &disconnectedIndices[0], disconnectedCount);
+
+                bool rematch = true;
+                for(int i = 0; i < 3; i++)
+                {
+                    rematch = rematch && server.rematch[i];
+                }
+                if(rematch)
+                {
+                    StartGame(&server, DEFAULT_FEN);
+                }
             }
         }
 

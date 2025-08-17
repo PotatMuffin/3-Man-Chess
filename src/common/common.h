@@ -3,6 +3,8 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
 
 #define PORT 42069
 
@@ -56,6 +58,8 @@ typedef struct {
     uint8_t colourToMove;
     uint8_t eliminatedColour;
     Clock clock;
+    int fiftyMoveClock;
+    int moveCount;
 } Board;
 
 typedef struct {
@@ -84,9 +88,13 @@ enum MessageFlag {
     ENDOFGAME,
     PING,
     GAMEINPROGRESS,
+    GOODBYE,
+    REMATCH,
+    RESIGN,
 };
 
 enum EndFlag {
+    NOTHING,
     TIMEOUT,
     CHECKMATE,
     ABANDONMENT,
@@ -96,6 +104,19 @@ enum EndFlag {
     INSUFFMAT,
     AGREEMENT,
     REPETITION,
+};
+
+static const char *EndFlagString[] = {
+    [NOTHING]     = "nothing?!?!",
+    [TIMEOUT]     = "timeout",
+    [CHECKMATE]   = "checkmate",
+    [ABANDONMENT] = "abandonment",
+    [RESIGNATION] = "resignation",
+    [STALEMATE]   = "stalemate",
+    [FIFTYRULE]   = "fifty move rule",
+    [INSUFFMAT]   = "insufficient material",
+    [AGREEMENT]   = "agreement",
+    [REPETITION]  = "repetition",
 };
 
 struct GameStart {
@@ -127,6 +148,10 @@ struct Ping {
     uint32_t data;
 };
 
+struct Rematch {
+    bool agree;
+};
+
 typedef struct {
     uint16_t flag;
     union {
@@ -136,6 +161,7 @@ typedef struct {
         struct Eliminated eliminated;
         struct EndOfGame endOfGame;
         struct Ping ping;
+        struct Rematch rematch;
     };
 } Message;
 
@@ -295,6 +321,7 @@ inline int DownRight(int square, int distance)
     return UpLeft(square, -distance);
 }
 
+void AddMove(MoveList *list, Move move);
 void GenerateMoves(Board *board, MoveList *moveList);
 bool InCheck();
 bool ChecksEnemy(Board *board, Move move);
@@ -328,6 +355,17 @@ inline void MovePiece(PieceList *list, uint8_t start, uint8_t target)
 inline bool IsNullMove(Move move)
 {
     return move.start == 0 && move.target == 0;
+}
+
+inline char *GetColourString(int colour)
+{
+    switch(colour)
+    {
+        case WHITE: return "White";
+        case GRAY:  return "Gray";
+        case BLACK: return "Black";
+        default:    return "erm, invalid colour :/"; 
+    }
 }
 
 int InitSockets();

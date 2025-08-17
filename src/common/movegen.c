@@ -46,7 +46,7 @@ static int checks;
 static bool pinMap[144];
 static int pinDirection[144];
 
-inline void AddMove(MoveList *list, Move move)
+void AddMove(MoveList *list, Move move)
 {
     if(list->count+1 >= list->capacity)
     {

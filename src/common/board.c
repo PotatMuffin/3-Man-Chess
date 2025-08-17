@@ -140,6 +140,13 @@ void MakeMove(Board *board, Move move)
         }
     }
 
+    board->moveCount++;
+    board->fiftyMoveClock++;
+    if(capturedPiece != NONE || pieceType == PAWN || pieceType == PAWNCC)
+    {
+        board->fiftyMoveClock = 0;
+    }
+
     NextMove(board);
 }
 

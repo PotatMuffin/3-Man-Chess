@@ -45,6 +45,7 @@ int InitServer(Server *server);
 int AwaitPlayers(Server *server);
 void CloseServer(Server *server);
 void HandlePlayerMessage(Server *server, int *disconnectedIndices, int *PdisconnectedCount);
+bool IsInsufficientMaterial(Server *server);
 int GetWinner(Server *server);
 
 void Broadcast(Server *server, Message *msg)
@@ -387,6 +388,11 @@ bool UpdateGame(Server *server, double deltaTime, struct EndOfGame *gameEnd)
                 }
             }
         }
+        else if(IsInsufficientMaterial(server))
+        {
+            endReason = INSUFFMAT;
+            isDraw    = true;
+        }
     }
 
     UpdateClock(&server->board, deltaTime);
@@ -425,12 +431,75 @@ bool UpdateGame(Server *server, double deltaTime, struct EndOfGame *gameEnd)
 
 int GetWinner(Server *server)
 {
-    if(server->eliminatedPlayerCount != 2) return 0;
+    if(server->eliminatedPlayerCount < 2) return 0;
     for(int i = 0; i < server->playerCount; i++)
     {
         if(!server->eliminated[i]) return server->colour[i];
     }
     return -1;
+}
+
+bool IsInsufficientMaterial(Server *server)
+{
+    bool allMoatsBridged = true;
+    for(int i = 0; i < 3; i++)
+    {
+        allMoatsBridged = allMoatsBridged && server->board.bridgedMoats[i];
+    }
+
+    printf("allMoatsBridged = %d\n", allMoatsBridged);
+
+    for(int i = 0; i < server->playerCount; i++)
+    {
+        if(server->eliminated[i]) continue;
+        int colour = server->colour[i];
+
+        // a pawn can promote to a queen or rook
+        // even when all moats are bridged it is still theoretically possible to checkmate with a king and rook/queen
+        PieceList *pawns = GetPieceList(&server->board, colour | PAWN);
+        PieceList *rooks = GetPieceList(&server->board, colour | ROOK);
+        PieceList *queens = GetPieceList(&server->board, colour | QUEEN);
+        if((queens->count + rooks->count + pawns->count) >= 1) return false;
+
+        PieceList *knights = GetPieceList(&server->board, colour | KNIGHT);
+        PieceList *bishops = GetPieceList(&server->board, colour | BISHOP);
+
+        int darkBishopCount = 0;
+        int lightBishopCount = 0;
+        for(int i = 0; i < bishops->count; i++)
+        {
+            int square = bishops->pieces[i];
+            int rank = square / 24;
+            int file = square % 24;
+
+            bool isWhite = (rank+file)%2;
+            if(isWhite) lightBishopCount++;
+            else darkBishopCount++;
+        }
+
+        // when at least one moat is bridged it can be used as a wall just like the edge in normal chess
+        // this allows you to deliver checkmate with 2 knights, 2 bishops, or 1 knight + 1 bishop
+        if(!allMoatsBridged) 
+        {
+            if(knights->count >= 2) return false;
+            if(knights->count >= 1 && bishops->count >= 1) return false;
+            // if you have no knights you need at least 1 bishop on either colour square
+            if(lightBishopCount >= 1 && darkBishopCount >= 1) return false;
+        }
+        else 
+        {
+            // but when all moats are bridged it becomes more complicated
+            // at least 3 knights are sufficient to deliver checkmate
+            if(knights->count >= 3) return false;
+            // if you have at least 3 bishops you need at least 2 bishops on one colour square and 1 on the other
+            if(bishops->count >= 3 && lightBishopCount >= 1 && darkBishopCount >= 1) return false;
+            // if you have only 1 bishop you need at least 2 other knights
+            if(bishops->count == 1 && knights->count >= 2) return false;
+            // if you have only 1 knight you need at least 1 bishop on either colour square
+            if(knights->count == 1 && lightBishopCount >= 1 && darkBishopCount >= 1) return false;
+        }
+    }
+    return true;
 }
 
 void CloseServer(Server *server)
@@ -512,7 +581,10 @@ int main()
         {
             if(!UpdateGame(&server, deltaTime, &gameEnd)) 
             {
-                printf("game has ended!!\nreason: %s, winner: %s\n", EndFlagString[gameEnd.reason], GetColourString(gameEnd.winner));
+                printf("game has ended!!\nreason: %s, winner: %s\n", 
+                       EndFlagString[gameEnd.reason], 
+                       (gameEnd.winner == 0) ? "no one" : GetColourString(gameEnd.winner)
+                );
                 gameState = AWAITINGREMATCH;
 
                 message.flag = ENDOFGAME;

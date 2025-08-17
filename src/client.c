@@ -61,7 +61,6 @@ static const int gameOverButtonWidth = gameOverBox.width / 2 - (float)gameOverBu
 enum Button {
     BUTTONREMATCH,
     BUTTONEXIT,
-    BUTTONRESIGN,
 };
 
 // this is probably a bad way to do this
@@ -210,7 +209,6 @@ int main()
 
         buttons[BUTTONREMATCH].active = gameState == GAMEOVER;
         buttons[BUTTONEXIT].active    = gameState == GAMEOVER;
-        buttons[BUTTONRESIGN].active  = gameState == YESGAME;
 
         UpdateButtons(&board);
 

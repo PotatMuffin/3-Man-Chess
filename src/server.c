@@ -401,6 +401,9 @@ bool UpdateGame(Server *server, double deltaTime, struct EndOfGame *gameEnd)
 
     if(turnEnded)
     {
+        for(int i = 0; i < 3; i++) server->draw[i] = false;
+        server->drawOffered = false;
+
         if((server->board.fiftyMoveClock / 3) >= 50)
         {
             endReason = FIFTYRULE;

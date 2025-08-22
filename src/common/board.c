@@ -152,21 +152,22 @@ void MakeMove(Board *board, Move move)
 
 void NextMove(Board *board)
 {
-    if(board->colourToMove == WHITE) 
-    { 
-        if(board->eliminatedColour == GRAY) board->colourToMove = BLACK;
-        else board->colourToMove = GRAY;
+    int nextColour = NextColourToPlay(board);
+    board->colourToMove = nextColour;
+    if(nextColour == board->eliminatedColour) 
+    {
+        board->moveCount++;
+        board->fiftyMoveClock++;
+        board->colourToMove = NextColourToPlay(board);
     }
-    else if(board->colourToMove == GRAY) 
-    { 
-        if(board->eliminatedColour == BLACK) board->colourToMove = WHITE;
-        else board->colourToMove = BLACK;
-    }
-    else if(board->colourToMove == BLACK) 
-    { 
-        if(board->eliminatedColour == WHITE) board->colourToMove = GRAY;
-        else board->colourToMove = WHITE;
-    }
+}
+
+int NextColourToPlay(Board *board)
+{
+    int colourIndex = (board->colourToMove/8)-1;
+    int nextColourIndex = (colourIndex+1)%3;
+    int nextColour = (nextColourIndex+1)*8;
+    return nextColour;
 }
 
 void EliminateColour(Board *board, uint8_t colour)
@@ -175,6 +176,7 @@ void EliminateColour(Board *board, uint8_t colour)
     int index = (colour >> 3)-1;
     board->bridgedMoats[index] = true;
     board->bridgedMoats[(index+1)%3] = true;
+    board->fiftyMoveClock = 0;
 }
 
 bool IsBackRankVacated(Board *board, uint8_t section)

@@ -124,7 +124,9 @@ int selectedSquare = -1;
 char highlightedSquares[144];
 
 MoveList moveList = {0};
+MoveList playedMoves = {0};
 Move lastMove = {0};
+MoveNotations moveNotations;
 
 Vector2 SquareCenterCoords[144];
 
@@ -160,6 +162,7 @@ void DrawClock(Board *board);
 void DrawBoard(Board *board);
 void DrawEndScreen();
 void DrawButton(enum Button buttonIndex);
+void DrawMoveList(MoveList *moveList);
 void UpdateAnimation(Animation *animation, double deltaTime);
 
 int PollConnection();
@@ -256,6 +259,7 @@ int main()
         if(gameState == YESGAME)
         {
             DrawClock(&board);
+            DrawMoveList(&playedMoves);
         }
         else if(gameState == GAMEOVER)
         {
@@ -290,10 +294,13 @@ int main()
         EndDrawing();
     }
 
-    msg.flag = GOODBYE;
-    Write(sock, &msg, sizeof(msg));
-    Shutdown(sock);
-    Close(sock);
+    if(sock != NULL)
+    {
+        msg.flag = GOODBYE;
+        Write(sock, &msg, sizeof(msg));
+        Shutdown(sock);
+        Close(sock);
+    }
 
     CloseAudioDevice();
     CleanupSockets();
@@ -721,6 +728,30 @@ void DrawEndScreen()
     DrawButton(BUTTONEXIT);
 }
 
+void DrawMoveList(MoveList *moveList)
+{
+    static const Rectangle MoveListWindow = { .x = 1550, .y = 200, .width = 300, .height = 600 };
+    static const int third = (MoveListWindow.width - 20) / 3;
+    static const float fontSize = 20.0f;
+    static const int maxMoves = (MoveListWindow.height-20) / (int)fontSize;
+    DrawRectangleRounded(MoveListWindow, 0.1f, 0, CLOCKBACKGROUND);
+
+    int start = 0;
+    int moveCount = moveNotations.count / 3 + ((moveNotations.count % 3) != 0);
+    if(maxMoves < moveCount) start = (moveCount - maxMoves)*3;
+    for(int i = start; i < moveNotations.count; i++)
+    {
+        int index = i - start;
+        int line   = index / 3;
+        int column = index % 3;
+        Vector2 pos = { 
+            MoveListWindow.x + 10 + third * column, 
+            MoveListWindow.y + 10 + 20 * line,
+        };
+        DrawText(moveNotations.items[i], pos.x, pos.y, fontSize, RL_WHITE);
+    }
+}
+
 void PlayMoveAudio(Board *board, Move move)
 {
     if(ChecksEnemy(board, move))             PlaySound(checkSound);
@@ -794,9 +825,17 @@ int HandleServerMessage(Board *board)
     }
     else if(msg.flag == MOVEPLAYED)
     {
-        printf("time left on clock: %f\n", msg.movePlayed.clockTime);
         SetClock(board, board->colourToMove, msg.movePlayed.clockTime);
         Move move = msg.playMove.move;
+
+        AddMove(&playedMoves, move);
+        GetMoveNotation(board, move, &moveNotations);
+
+        if(NextColourToPlay(board) == board->eliminatedColour)
+        {
+            GetMoveNotation(board, nullMove, &moveNotations);
+        }
+
         ResetSquares();
         PlayMoveAudio(board, move);
         CreateAnimation(&_animation, board, move);
@@ -808,7 +847,11 @@ int HandleServerMessage(Board *board)
         uint8_t colour = msg.eliminated.colour;
         SetClock(board, colour, msg.eliminated.clockTime);
         EliminateColour(board, colour);
-        if(board->colourToMove == colour) NextMove(board);
+        if(board->colourToMove == colour) 
+        {
+            GetMoveNotation(board, nullMove, &moveNotations);
+            NextMove(board);
+        }
     }
     else if(msg.flag == ENDOFGAME)
     {

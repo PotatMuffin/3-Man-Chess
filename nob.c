@@ -39,7 +39,8 @@ char *common_files[] = {
     "movegen",
     "board",
     "fen",
-    "sockets"
+    "sockets",
+    "movenotation",
 };
 
 Asset assets[] = {

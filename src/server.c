@@ -447,8 +447,6 @@ bool IsInsufficientMaterial(Server *server)
         allMoatsBridged = allMoatsBridged && server->board.bridgedMoats[i];
     }
 
-    printf("allMoatsBridged = %d\n", allMoatsBridged);
-
     for(int i = 0; i < server->playerCount; i++)
     {
         if(server->eliminated[i]) continue;

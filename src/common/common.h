@@ -80,6 +80,8 @@ enum MoveFlag {
     ENPASSANT,
 };
 
+#define nullMove ((Move) { 0 })
+
 enum MessageFlag {
     GAMESTART,
     PLAYMOVE,
@@ -170,6 +172,12 @@ typedef struct {
     int count;
     int capacity;
 } MoveList;
+
+typedef struct {
+    char **items;
+    size_t count;
+    size_t capacity;
+} MoveNotations;
 
 typedef struct Socket Socket;
 
@@ -326,6 +334,7 @@ void GenerateMoves(Board *board, MoveList *moveList);
 bool InCheck();
 bool ChecksEnemy(Board *board, Move move);
 
+int NextColourToPlay(Board *board);
 inline int GetIndex(int rank, int file, int section) { return rank*24+file+section*8; }
 
 inline void AddPiece(PieceList *list, uint8_t square)
@@ -367,6 +376,8 @@ inline char *GetColourString(int colour)
         default:    return "erm, invalid colour :/"; 
     }
 }
+
+void GetMoveNotation(Board *board, Move move, MoveNotations *notations);
 
 int InitSockets();
 void CleanupSockets();

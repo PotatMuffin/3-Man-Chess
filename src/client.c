@@ -52,15 +52,25 @@ static const int borderSize = rankSize/3;
 static const int boardRadius = centerSize+rankSize*6;
 static const Vector2 center = {WIDTH/2, HEIGHT/2};
 
+static const int buttonPadding = 10;
+static const int buttonHeight = 50;
+
 static const Vector2   gameOverBoxSize = { 300, 150 }; 
 static const Rectangle gameOverBox = { .x = center.x - gameOverBoxSize.x / 2, .y = center.y - gameOverBoxSize.y / 2, .width = gameOverBoxSize.x, .height = gameOverBoxSize.y };
-static const int gameOverButtonPadding = 10;
-static const int gameOverButtonHeight = 50;
-static const int gameOverButtonWidth = gameOverBox.width / 2 - (float)gameOverButtonPadding * 1.5f;
+static const int gameOverButtonWidth = gameOverBox.width / 2 - (float)buttonPadding * 1.5f;
+
+static const Rectangle MoveListWindow = { .x = 1550, .y = 200, .width = 300, .height = 600 };
+static const int gameButtonWidth = MoveListWindow.width / 2 - buttonPadding / 2;
+
+static const float drawFontSize = 30.0f;
 
 enum Button {
     BUTTONREMATCH,
     BUTTONEXIT,
+    BUTTONRESIGN,
+    BUTTONDRAW,
+    BUTTONACCEPTDRAW,
+    BUTTONDECLINEDRAW,
 };
 
 // this is probably a bad way to do this
@@ -68,9 +78,9 @@ enum Button {
 static Button buttons[] = {
     [BUTTONREMATCH] = { 
         .bounds = {
-            .x = gameOverBox.x + gameOverButtonPadding,
-            .y = gameOverBox.y + gameOverBox.height - gameOverButtonPadding - gameOverButtonHeight,
-            .height = gameOverButtonHeight,
+            .x = gameOverBox.x + buttonPadding,
+            .y = gameOverBox.y + gameOverBox.height - buttonPadding - buttonHeight,
+            .height = buttonHeight,
             .width  = gameOverButtonWidth,
         },  
         .normalText = "rematch",
@@ -81,15 +91,64 @@ static Button buttons[] = {
     },
     [BUTTONEXIT] = {
         .bounds = {
-            .x = gameOverBox.x + gameOverBox.width - gameOverButtonWidth - gameOverButtonPadding,
-            .y = gameOverBox.y + gameOverBox.height - gameOverButtonPadding - gameOverButtonHeight,
-            .height = gameOverButtonHeight,
+            .x = gameOverBox.x + gameOverBox.width - gameOverButtonWidth - buttonPadding,
+            .y = gameOverBox.y + gameOverBox.height - buttonPadding - buttonHeight,
+            .height = buttonHeight,
             .width  = gameOverButtonWidth,
         },
         .normalText = "exit",
         .bgColour = {0x81, 0xB6, 0x4C, 0xFF},
         .fgColour = RL_WHITE,
         .fontSize = 24.0f,
+    },
+    [BUTTONRESIGN] = {
+        .bounds = {
+            .x = MoveListWindow.x,
+            .y = MoveListWindow.y + MoveListWindow.height + buttonPadding,
+            .width = gameButtonWidth,
+            .height = buttonHeight,
+        },
+        .normalText = "resign",
+        .bgColour   = {0x81, 0xB6, 0x4C, 0xFF},
+        .fgColour   = RL_WHITE,
+        .fontSize   = 28.0f,
+    },
+    [BUTTONDRAW] = {
+        .bounds = {
+            .x = MoveListWindow.x + MoveListWindow.width / 2 + buttonPadding / 2,
+            .y = MoveListWindow.y + MoveListWindow.height + buttonPadding,
+            .width = gameButtonWidth,
+            .height = buttonHeight,
+        },
+        .normalText = "draw",
+        .toggleText = "X draw",
+        .bgColour = {0x81, 0xB6, 0x4C, 0xFF},
+        .fgColour = RL_WHITE,
+        .fontSize = 28.0f,
+    },
+    [BUTTONACCEPTDRAW] = {
+        .bounds = {
+            .x = MoveListWindow.x,
+            .y = MoveListWindow.y + MoveListWindow.height + buttonHeight + buttonPadding * 3 + drawFontSize,
+            .width = gameButtonWidth,
+            .height = buttonHeight,
+        },
+        .normalText = "accept",
+        .bgColour = {0x81, 0xB6, 0x4C, 0xFF},
+        .fgColour = RL_WHITE,
+        .fontSize = 28.0f,
+    },
+    [BUTTONDECLINEDRAW] = {
+        .bounds = {
+            .x = MoveListWindow.x + MoveListWindow.width / 2 + buttonPadding / 2,
+            .y = MoveListWindow.y + MoveListWindow.height + buttonHeight + buttonPadding * 3 + drawFontSize,
+            .width = gameButtonWidth,
+            .height = buttonHeight,
+        },
+        .normalText = "decline",
+        .bgColour = {0x81, 0xB6, 0x4C, 0xFF},
+        .fgColour = RL_WHITE,
+        .fontSize = 28.0f,
     },
 };
 
@@ -117,6 +176,7 @@ enum GameState gameState  = NOGAME;
 enum EndFlag   endReason  = NONE;
 int            gameWinner = -1;
 double connectTime = 0.0f;
+bool drawOffered = false;
 
 uint8_t perspective = WhitePerspective;
 
@@ -125,7 +185,7 @@ char highlightedSquares[144];
 
 MoveList moveList = {0};
 MoveList playedMoves = {0};
-Move lastMove = {0};
+Move lastMove = nullMove;
 MoveNotations moveNotations;
 
 Vector2 SquareCenterCoords[144];
@@ -163,6 +223,7 @@ void DrawBoard(Board *board);
 void DrawEndScreen();
 void DrawButton(enum Button buttonIndex);
 void DrawMoveList(MoveList *moveList);
+void DrawDrawUI();
 void UpdateAnimation(Animation *animation, double deltaTime);
 
 int PollConnection();
@@ -210,8 +271,12 @@ int main()
         UpdateTextBox(&ip[0], &charCount, MAX_CHARS);
         UpdateGame(&board, deltaTime);
 
-        buttons[BUTTONREMATCH].active = gameState == GAMEOVER;
-        buttons[BUTTONEXIT].active    = gameState == GAMEOVER;
+        buttons[BUTTONREMATCH].active     = gameState == GAMEOVER;
+        buttons[BUTTONEXIT].active        = gameState == GAMEOVER;
+        buttons[BUTTONRESIGN].active      = gameState == YESGAME;
+        buttons[BUTTONDRAW].active        = gameState == YESGAME;
+        buttons[BUTTONACCEPTDRAW].active  = drawOffered;     
+        buttons[BUTTONDECLINEDRAW].active = drawOffered;     
 
         UpdateButtons(&board);
 
@@ -260,6 +325,13 @@ int main()
         {
             DrawClock(&board);
             DrawMoveList(&playedMoves);
+            DrawButton(BUTTONRESIGN);
+            DrawButton(BUTTONDRAW);
+
+            if(drawOffered)
+            {
+                DrawDrawUI();
+            }
         }
         else if(gameState == GAMEOVER)
         {
@@ -393,7 +465,8 @@ void UpdateGame(Board *board, double deltaTime)
     if(res != 0)
     {
         gameState = NOGAME;
-        lastMove = (Move){ 0 };
+        moveNotations.count = 0;
+        lastMove = nullMove;
         InitBoard(board, DEFAULT_FEN);
         Close(sock);
         sock = NULL;
@@ -505,6 +578,29 @@ void UpdateButtons(Board *board)
                 Shutdown(sock);
                 Close(sock);
                 sock = NULL;
+            }; break;
+            case BUTTONRESIGN: {
+                msg.flag = RESIGN;
+                Write(sock, &msg, sizeof(msg));
+            }; break;
+            case BUTTONACCEPTDRAW: {
+                buttons[BUTTONDRAW].toggled = true;
+                drawOffered = false;
+                goto sendDrawResponse;
+            }; break;
+            case BUTTONDECLINEDRAW: {
+                buttons[BUTTONDRAW].toggled = false;
+                drawOffered = false;
+                goto sendDrawResponse;
+            }; break;
+            case BUTTONDRAW: {
+                buttons[i].toggled = !buttons[i].toggled;
+
+                sendDrawResponse:
+                msg.draw.agree = buttons[BUTTONDRAW].toggled;
+                msg.flag = DRAW;
+                Write(sock, &msg, sizeof(msg));
+                break;
             }; break;
         }
         break;
@@ -730,7 +826,6 @@ void DrawEndScreen()
 
 void DrawMoveList(MoveList *moveList)
 {
-    static const Rectangle MoveListWindow = { .x = 1550, .y = 200, .width = 300, .height = 600 };
     static const int third = (MoveListWindow.width - 20) / 3;
     static const float fontSize = 20.0f;
     static const int maxMoves = (MoveListWindow.height-20) / (int)fontSize;
@@ -750,6 +845,22 @@ void DrawMoveList(MoveList *moveList)
         };
         DrawText(moveNotations.items[i], pos.x, pos.y, fontSize, RL_WHITE);
     }
+}
+
+void DrawDrawUI()
+{
+    static const char *text = "Draw offered!";
+    static const float spacing = drawFontSize / 10.0f;
+
+    Vector2 textSize = MeasureTextEx(font, text, drawFontSize, spacing);
+    Vector2 pos = {
+        .x = MoveListWindow.x + (MoveListWindow.width - textSize.x) / 2,
+        .y = MoveListWindow.y + MoveListWindow.height + buttonHeight + buttonPadding * 2,
+    };
+
+    DrawText(text, pos.x, pos.y, drawFontSize, RL_WHITE);
+    DrawButton(BUTTONACCEPTDRAW);
+    DrawButton(BUTTONDECLINEDRAW);
 }
 
 void PlayMoveAudio(Board *board, Move move)
@@ -817,6 +928,8 @@ int HandleServerMessage(Board *board)
     if(msg.flag == GAMESTART)
     {
         gameState = YESGAME;
+        drawOffered = false;
+        buttons[BUTTONDRAW].toggled = false;
         buttons[BUTTONREMATCH].toggled = false;
         printf("Starting game with fen:\n%s\nand colour: %d\n", msg.gameStart.FEN, msg.gameStart.colour);
         perspective = (msg.gameStart.colour >> 3) - 1;
@@ -825,6 +938,8 @@ int HandleServerMessage(Board *board)
     }
     else if(msg.flag == MOVEPLAYED)
     {
+        drawOffered = false;
+        buttons[BUTTONDRAW].toggled = false;
         SetClock(board, board->colourToMove, msg.movePlayed.clockTime);
         Move move = msg.playMove.move;
 
@@ -859,6 +974,7 @@ int HandleServerMessage(Board *board)
         endReason = msg.endOfGame.reason;
         gameWinner = msg.endOfGame.winner;
         lastMove = (Move){ 0 };
+        moveNotations.count = 0;
 
         printf("game ended!\nreason: %d\nwinner: %d\n", msg.endOfGame.reason, msg.endOfGame.winner);
     }
@@ -872,6 +988,18 @@ int HandleServerMessage(Board *board)
     else if(msg.flag == GAMEINPROGRESS)
     {
         gameState = GAMEALREADYSTARTED;
+    }
+    else if(msg.flag == DRAW)
+    {
+        if(!msg.draw.agree) 
+        {
+            buttons[BUTTONDRAW].toggled = false;
+            drawOffered = false;
+        }
+        else 
+        {
+            drawOffered = true;
+        }
     }
     return 0;
 }

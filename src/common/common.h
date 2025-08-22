@@ -93,6 +93,7 @@ enum MessageFlag {
     GOODBYE,
     REMATCH,
     RESIGN,
+    DRAW,
 };
 
 enum EndFlag {
@@ -150,7 +151,7 @@ struct Ping {
     uint32_t data;
 };
 
-struct Rematch {
+struct Offer {
     bool agree;
 };
 
@@ -163,7 +164,8 @@ typedef struct {
         struct Eliminated eliminated;
         struct EndOfGame endOfGame;
         struct Ping ping;
-        struct Rematch rematch;
+        struct Offer rematch;
+        struct Offer draw;
     };
 } Message;
 

@@ -21,6 +21,9 @@ typedef struct {
     int eliminatedPlayerCount;
     bool eliminated[3];
     bool rematch[3];
+    bool resigned[3];
+    bool draw[3];
+    bool drawOffered;
 } Server;
 
 typedef enum {
@@ -196,6 +199,36 @@ void HandlePlayerMessage(Server *server, int *disconnectedIndices, int *Pdisconn
                     server->rematch[playerIndex] = msg.rematch.agree;
                 }
             }; break;
+            case RESIGN: {
+                server->resigned[playerIndex] = true;
+            }; break;
+            case DRAW: {
+                if(server->eliminated[i]) break;
+                server->draw[playerIndex] = msg.draw.agree;
+                if(!server->drawOffered)
+                {
+                    server->drawOffered = true;
+                    for(int i = 0; i < server->playerCount; i++)
+                    {
+                        if(i == playerIndex) continue;
+                        response.flag = DRAW;
+                        response.draw.agree = true;
+                        Write(server->clients[i], &response, sizeof(response));
+                    }
+                }
+                else if(!msg.draw.agree)
+                {
+                    server->drawOffered = false;
+                    for(int i = 0; i < server->playerCount; i++)
+                    {
+                        server->draw[i] = false;
+                        if(i == playerIndex) continue;
+                        response.flag = DRAW;
+                        response.draw.agree = false;
+                        Write(server->clients[i], &response, sizeof(response));
+                    }
+                }
+            }; break;
             case GOODBYE: {
                 disconnectedIndices[disconnectedCount++] = i;
             }; break;
@@ -250,6 +283,8 @@ void HandleDisconnect(Server *server, int *Pindex, int count)
     pingResponses[playerIndexToReplace]      = pingResponses[playerIndexToMove];
     server->rematch[playerIndexToReplace]    = server->rematch[playerIndexToMove];
     server->eliminated[playerIndexToReplace] = server->eliminated[playerIndexToMove];
+    server->resigned[playerIndexToReplace]   = server->resigned[playerIndexToMove];
+    server->draw[playerIndexToReplace]       = server->draw[playerIndexToMove];
 }
 
 int InitServer(Server *server)
@@ -331,8 +366,14 @@ void StartGame(Server *server, char *FEN)
 
     GenerateMoves(&server->board, &legalMoves);
 
-    for(int i = 0; i < 3; i++) server->rematch[i]    = false;
-    for(int i = 0; i < 3; i++) server->eliminated[i] = false;
+    for(int i = 0; i < 3; i++) 
+    {
+        server->rematch[i]    = false;
+        server->eliminated[i] = false;
+        server->draw[i]       = false;
+        server->resigned[i]   = false;
+    }
+    server->drawOffered = false;
     gameState = YESGAME;
 }
 
@@ -413,10 +454,31 @@ bool UpdateGame(Server *server, double deltaTime, struct EndOfGame *gameEnd)
         for(int i = 0; i < disconnectedCount; i++)
         {
             int playerIndex = disconnectedIndices[i] - 1;
+            if(server->eliminated[playerIndex]) continue;
             EliminatePlayer(server, playerIndex);
         }
         HandleDisconnect(server, &disconnectedIndices[0], disconnectedCount);
         endReason = ABANDONMENT;
+    }
+
+    bool drawAgreement = server->drawOffered;
+    for(int playerIndex = 0; playerIndex < server->playerCount; playerIndex++)
+    {
+        if(server->eliminated[playerIndex]) continue;
+        if(server->resigned[playerIndex]) 
+        {
+            EliminatePlayer(server, playerIndex);
+            server->resigned[playerIndex] = false;
+            endReason = RESIGNATION;
+        }
+
+        drawAgreement = drawAgreement && server->draw[playerIndex];
+    }
+
+    if(drawAgreement)
+    {
+        endReason = AGREEMENT;
+        isDraw = true;
     }
 
     if(server->eliminatedPlayerCount > 1 || isDraw)

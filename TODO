@@ -9,3 +9,7 @@
  - add clocks - DONE
  - port to winblows - DONE
 
+ - make move history scrollable
+ - resign/draw button - DONE
+ - better screen when awaiting game start
+ - repetition detection

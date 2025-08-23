@@ -722,6 +722,18 @@ bool ChecksEnemy(Board *board, Move move)
 {
     uint8_t pieceType = GetPieceType(board->map[move.start]);
 
+    if(pieceType == PAWNCC)
+    {
+        switch(move.flag)
+        {
+            case PROMOTETOKNIGHT: pieceType = KNIGHT; break;
+            case PROMOTETOBISHOP: pieceType = BISHOP; break;
+            case PROMOTETOROOK:   pieceType = ROOK;   break;
+            case PROMOTETOQUEEN:  pieceType = QUEEN;  break;
+            default: break;
+        }
+    }
+
     if(pieceType != KNIGHT)
     {
         int startDir = (IsQueenOrRook(pieceType)) ? 0 : 4;
@@ -734,7 +746,9 @@ bool ChecksEnemy(Board *board, Move move)
                 Move m = moves[move.target][dir][i];
                 if(CrossesMoat(m, dir, i)) break;
                 int piece = board->map[m.target];
-                if(GetPieceType(piece) == KING && GetPieceColour(piece) != board->colourToMove) return true;
+                int pieceType = GetPieceType(piece);
+                int pieceColour = GetPieceColour(piece);
+                if(pieceType == KING && pieceColour != board->colourToMove && pieceColour != board->eliminatedColour) return true;
                 if(piece != NONE) break;
             }
         }
@@ -745,7 +759,9 @@ bool ChecksEnemy(Board *board, Move move)
         {
             Move m = knightMoves[move.target][i];
             int piece = board->map[m.target];
-            if(GetPieceType(piece) == KING && GetPieceColour(piece) != board->colourToMove) return true;
+            int pieceType = GetPieceType(piece);
+            int pieceColour = GetPieceColour(piece);
+            if(pieceType == KING && pieceColour != board->colourToMove && pieceColour != board->eliminatedColour) return true;
         }
     }
 

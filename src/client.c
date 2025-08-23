@@ -190,7 +190,7 @@ MoveNotations moveNotations;
 
 Vector2 SquareCenterCoords[144];
 
-const double animationDuration = 0.1f;
+const double animationDuration = 0.2f;
 Animation _animation;
 
 Sound moveSound;

@@ -13,3 +13,6 @@
  - resign/draw button - DONE
  - better screen when awaiting game start
  - repetition detection
+ - premoves
+ - allow disconnect for a couple of seconds without being eliminated
+ - arrows

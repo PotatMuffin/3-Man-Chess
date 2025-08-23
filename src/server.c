@@ -203,7 +203,7 @@ void HandlePlayerMessage(Server *server, int *disconnectedIndices, int *Pdisconn
                 server->resigned[playerIndex] = true;
             }; break;
             case DRAW: {
-                if(server->eliminated[i]) break;
+                if(server->eliminated[playerIndex]) break;
                 server->draw[playerIndex] = msg.draw.agree;
                 if(!server->drawOffered)
                 {
@@ -211,6 +211,7 @@ void HandlePlayerMessage(Server *server, int *disconnectedIndices, int *Pdisconn
                     for(int i = 0; i < server->playerCount; i++)
                     {
                         if(i == playerIndex) continue;
+                        if(server->eliminated[i]) continue;
                         response.flag = DRAW;
                         response.draw.agree = true;
                         Write(server->clients[i], &response, sizeof(response));
@@ -223,6 +224,7 @@ void HandlePlayerMessage(Server *server, int *disconnectedIndices, int *Pdisconn
                     {
                         server->draw[i] = false;
                         if(i == playerIndex) continue;
+                        if(server->eliminated[i]) continue;
                         response.flag = DRAW;
                         response.draw.agree = false;
                         Write(server->clients[i], &response, sizeof(response));

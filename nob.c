@@ -3,11 +3,14 @@
 
 #include "version.h"
 
+#define THREE_MAN_CHESS "3_man_chess"
 #define RAYLIB_SRC_DIR "./dep/raylib/src/"
 #define GLFW_DIR RAYLIB_SRC_DIR"external/glfw/include/"
 #define BUILD_DIR "./build/"
-#define CLIENT_OUTPUT_PATH BUILD_DIR"3_man_chess"
-#define SERVER_OUTPUT_PATH BUILD_DIR"3_man_chess_server"
+#define CLIENT_NAME "3_man_chess"
+#define SERVER_NAME "3_man_chess_server"
+#define CLIENT_OUTPUT_PATH BUILD_DIR CLIENT_NAME
+#define SERVER_OUTPUT_PATH BUILD_DIR SERVER_NAME
 #define RAYLIB_BUILD_DIR BUILD_DIR"raylib/"
 #define LIBRAYLIB_A "libraylib.a"
 #define SRC_DIR "./src/"
@@ -153,17 +156,28 @@ int main(int argc, char **argv)
             if(!nob_mkdir_if_not_exists(SHIP_DIR)) return 1;
 
             printf("preparing files for shipping!\n");
-            Nob_Cmd cmd = { 0 };
             const char *linux_archive = nob_temp_sprintf(SHIP_DIR"3_man_chess_%d.%d.%d_linux.zip", MAJOR, MINOR, PATCH);
-            nob_cmd_append(&cmd, "zip", "-q", linux_archive);
-            nob_cmd_append(&cmd, CLIENT_OUTPUT_PATH, SERVER_OUTPUT_PATH);
-            nob_cmd_run_sync(cmd);
-
-            cmd.count = 0;
             const char *windows_archive = nob_temp_sprintf(SHIP_DIR"3_man_chess_%d.%d.%d_windows.zip", MAJOR, MINOR, PATCH);
+
+            const char *linux_client_ship_path   = nob_temp_sprintf("%s/%s_%d.%d.%d",     THREE_MAN_CHESS, CLIENT_NAME, MAJOR, MINOR, PATCH);
+            const char *linux_server_ship_path   = nob_temp_sprintf("%s/%s_%d.%d.%d",     THREE_MAN_CHESS, SERVER_NAME, MAJOR, MINOR, PATCH);
+            const char *windows_client_ship_path = nob_temp_sprintf("%s/%s_%d.%d.%d.exe", THREE_MAN_CHESS, CLIENT_NAME, MAJOR, MINOR, PATCH);
+            const char *windows_server_ship_path = nob_temp_sprintf("%s/%s_%d.%d.%d.exe", THREE_MAN_CHESS, SERVER_NAME, MAJOR, MINOR, PATCH);
+
+            if(!nob_mkdir_if_not_exists(THREE_MAN_CHESS)) return 1;
+            if(!nob_copy_file(CLIENT_OUTPUT_PATH,       linux_client_ship_path))   return 1;
+            if(!nob_copy_file(SERVER_OUTPUT_PATH,       linux_server_ship_path))   return 1;
+            if(!nob_copy_file(CLIENT_OUTPUT_PATH".exe", windows_client_ship_path)) return 1;
+            if(!nob_copy_file(SERVER_OUTPUT_PATH".exe", windows_server_ship_path)) return 1;
+
+            Nob_Cmd cmd = { 0 };
+            nob_cmd_append(&cmd, "zip", "-q", linux_archive);
+            nob_cmd_append(&cmd, linux_client_ship_path, linux_server_ship_path);
+            nob_cmd_run_sync_and_reset(&cmd);
+
             nob_cmd_append(&cmd, "zip", "-q", windows_archive);
-            nob_cmd_append(&cmd, CLIENT_OUTPUT_PATH".exe", SERVER_OUTPUT_PATH".exe");
-            nob_cmd_run_sync(cmd);
+            nob_cmd_append(&cmd, windows_client_ship_path, windows_server_ship_path);
+            nob_cmd_run_sync_and_reset(&cmd);
         }
     }
 

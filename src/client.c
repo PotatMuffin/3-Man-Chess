@@ -157,10 +157,10 @@ float scaleY = 0;
 
 Message msg = {0};
 
-enum {
+enum Perspective {
     WhitePerspective = 0,
-    BlackPerspective = 1,
-    GrayPerspective  = 2,
+    GrayPerspective  = 1,
+    BlackPerspective = 2,
 };
 
 enum GameState {
@@ -178,10 +178,17 @@ int            gameWinner = -1;
 double connectTime = 0.0f;
 bool drawOffered = false;
 
-uint8_t perspective = WhitePerspective;
+enum Perspective perspective = WhitePerspective;
+int assignedColour = WHITE;
+
+enum Highlight {
+    NOHIGHLIGHT = 0,
+    NORMALHIGHLIGHT = 1,
+    ENEMYHIGHLIGHT = 2,
+};
 
 int selectedSquare = -1;
-char highlightedSquares[144];
+enum Highlight highlightedSquares[144];
 
 MoveList moveList = {0};
 MoveList playedMoves = {0};
@@ -215,8 +222,8 @@ void InitSquareCenterCoords();
 void CreateAnimation(Animation *animation, Board *board, Move move);
 int AdjustForPerspective(int index);
 
-void HighlightSquares(int square, MoveList *moveList);
-void HighlightSquare(int square);
+void HighlightSquares(int square, enum Highlight highlightType, MoveList *moveList);
+void HighlightSquare(int square, enum Highlight highlightType);
 void ResetSquares();
 void DrawClock(Board *board);
 void DrawBoard(Board *board);
@@ -491,8 +498,6 @@ void HandleInput(Board *board)
 {
     if(IsMouseButtonPressed(MOUSE_LEFT_BUTTON))
     {
-        Vector2 center = {WIDTH/2, HEIGHT/2};
-
         Vector2 mousePos = GetMousePositionScaled();
 
         float mouseDistance = Vector2Distance(mousePos, center);
@@ -502,7 +507,7 @@ void HandleInput(Board *board)
         int closestSquare = -1; 
         for(int square = 0; square < 144; square++)
         {
-            float distance = Vector2Distance(mousePos, SquareCenterCoords[square]);
+            float distance = Vector2DistanceSqr(mousePos, SquareCenterCoords[square]);
             if(distance < shortestDistance)
             {
                 shortestDistance = distance;
@@ -510,16 +515,31 @@ void HandleInput(Board *board)
             }
         }
 
-        if(perspective == BlackPerspective)     closestSquare = Left(closestSquare, 8);
-        else if(perspective == GrayPerspective) closestSquare = Right(closestSquare, 8);
+        if(perspective == BlackPerspective)     closestSquare = Right(closestSquare, 8);
+        else if(perspective == GrayPerspective) closestSquare = Left(closestSquare, 8);
 
         if (selectedSquare == -1)
         {
             if(board->map[closestSquare] == NONE) return;
             selectedSquare = closestSquare;
+            int pieceColour = GetPieceColour(board->map[closestSquare]);
 
-            GenerateMoves(board, &moveList);
-            HighlightSquares(selectedSquare, &moveList);
+            bool IsOwnPiece = assignedColour == board->colourToMove && pieceColour == assignedColour;
+            enum Highlight highlightType = (IsOwnPiece) ? NORMALHIGHLIGHT : ENEMYHIGHLIGHT;
+
+            if(IsOwnPiece)
+            {
+                GenerateMoves(board, &moveList);
+            }
+            else
+            {
+                if(pieceColour == board->eliminatedColour) return;
+                int colourToMove = board->colourToMove;
+                board->colourToMove = pieceColour;
+                GenerateMoves(board, &moveList);
+                board->colourToMove = colourToMove;
+            }
+            HighlightSquares(selectedSquare, highlightType, &moveList);
         }
         else 
         {
@@ -529,26 +549,28 @@ void HandleInput(Board *board)
             selectedSquare = -1;
             if(start == target) return;
 
-            Move chosenMove = {0};
-            moveList.count = 0;
-            GenerateMoves(board, &moveList);
-
-            for(int i = 0; i < moveList.count; i++)
+            if(assignedColour == board->colourToMove)
             {
-                Move move = moveList.moves[i];
-                if(move.start == start && move.target == target) 
+                Move chosenMove = {0};
+                GenerateMoves(board, &moveList);
+
+                for(int i = 0; i < moveList.count; i++)
                 {
-                    chosenMove = move;
-                    break;
+                    Move move = moveList.moves[i];
+                    if(move.start == start && move.target == target) 
+                    {
+                        chosenMove = move;
+                        break;
+                    }
                 }
+
+                if(IsNullMove(chosenMove)) return;
+
+                msg.flag = PLAYMOVE;
+                msg.playMove.move = chosenMove;
+                Write(sock, &msg, sizeof(msg));
+                // MakeMove(board, chosenMove);
             }
-
-            if(chosenMove.start == 0 && chosenMove.target == 0) return;
-
-            msg.flag = PLAYMOVE;
-            msg.playMove.move = chosenMove;
-            Write(sock, &msg, sizeof(msg));
-            // MakeMove(board, chosenMove);
         }
     }
 }
@@ -628,25 +650,25 @@ void InitSquareCenterCoords()
     }
 }
 
-inline void HighlightSquares(int square, MoveList *moveList)
+inline void HighlightSquares(int square, enum Highlight highlightType, MoveList *moveList)
 {
     for(int i = 0; i < moveList->count; i++)
     {
         Move move = moveList->moves[i];
-        if(move.start == square) HighlightSquare(move.target);
+        if(move.start == square) HighlightSquare(move.target, highlightType);
     }
 }
 
-inline void HighlightSquare(int square)
+inline void HighlightSquare(int square, enum Highlight highlightType)
 {
-    highlightedSquares[square] = 1;
+    highlightedSquares[square] = highlightType;
 }
 
 inline void ResetSquares()
 {
     for(int i = 0; i < 144; i++)
     {
-        highlightedSquares[i] = 0;
+        highlightedSquares[i] = NOHIGHLIGHT;
     }
 }
 
@@ -701,20 +723,22 @@ void DrawBoard(Board *board)
         for(int j = 0; j < 24; j++)
         {
             int index = i*24+j;
-            if(perspective == BlackPerspective)     index = Left(index, 8);
-            else if(perspective == GrayPerspective) index = Right(index, 8);
+            if(perspective == BlackPerspective)     index = Right(index, 8);
+            else if(perspective == GrayPerspective) index = Left(index, 8);
             Color colour = {0};
             if((i+j)%2)
             {
                 if(index == selectedSquare)          colour = SELECTLIGHT;
-                else if (highlightedSquares[index])  colour = NORMALLIGHT;
+                else if(highlightedSquares[index] == NORMALHIGHLIGHT) colour = NORMALLIGHT;
+                else if(highlightedSquares[index] == ENEMYHIGHLIGHT ) colour = ColorLerp(NORMALLIGHT, RL_BLACK, 0.4f);
                 else if((index == lastMove.start || index == lastMove.target) && !IsNullMove(lastMove)) colour = SELECTLIGHT;
                 else colour = GetColor(0xeed8c0FF);
             }
             else 
             {
                 if(index == selectedSquare)         colour = SELECTDARK;
-                else if(highlightedSquares[index])  colour = NORMALDARK;
+                else if(highlightedSquares[index] == NORMALHIGHLIGHT) colour = NORMALDARK;
+                else if(highlightedSquares[index] == ENEMYHIGHLIGHT ) colour = ColorLerp(NORMALDARK, RL_BLACK, 0.4f); 
                 else if((index == lastMove.start || index == lastMove.target) && !IsNullMove(lastMove)) colour = SELECTDARK;
                 else colour = GetColor(0xab7a65FF);
             }
@@ -750,8 +774,7 @@ void DrawBoard(Board *board)
         float size = pieceSize - (20*(float)rank/5);
 
         int index = square;
-        if(perspective == BlackPerspective)     index = Right(index, 8);
-        else if(perspective == GrayPerspective) index = Left(index, 8);
+        index = AdjustForPerspective(index);
 
         Vector2 position = SquareCenterCoords[index];
         DrawPiece(piece, position, size);
@@ -932,7 +955,8 @@ int HandleServerMessage(Board *board)
         buttons[BUTTONDRAW].toggled = false;
         buttons[BUTTONREMATCH].toggled = false;
         printf("Starting game with fen:\n%s\nand colour: %d\n", msg.gameStart.FEN, msg.gameStart.colour);
-        perspective = (msg.gameStart.colour >> 3) - 1;
+        assignedColour = msg.gameStart.colour;
+        perspective = (assignedColour >> 3) - 1;
         InitBoard(board, msg.gameStart.FEN);
         InitClock(board, msg.gameStart.timeControl);
     }
@@ -1097,7 +1121,7 @@ void UpdateAnimation(Animation *animation, double deltaTime)
 
 int AdjustForPerspective(int index)
 {
-    if(perspective == BlackPerspective)     index = Right(index, 8);
-    else if(perspective == GrayPerspective) index = Left(index, 8);   
+    if(perspective == BlackPerspective)     index = Left(index, 8);
+    else if(perspective == GrayPerspective) index = Right(index, 8);   
     return index;
 }

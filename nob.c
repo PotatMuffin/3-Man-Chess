@@ -123,7 +123,7 @@ bool bundle_assets()
 
 int main(int argc, char **argv)
 {
-    NOB_GO_REBUILD_URSELF_PLUS(argc, argv, "./build_src/nob_linux.c", "./build_src/nob_mingw.c");
+    NOB_GO_REBUILD_URSELF_PLUS(argc, argv, "./build_src/nob_linux.c", "./build_src/nob_mingw.c", "./version.h");
     if(!nob_mkdir_if_not_exists(BUILD_DIR)) return 1;
     if(!nob_mkdir_if_not_exists(RAYLIB_BUILD_DIR)) return 1;
 

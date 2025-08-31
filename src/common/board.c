@@ -16,7 +16,6 @@ bool IsBackRankVacated(Board *board, uint8_t section);
 int InitBoard(Board *board, char *FEN)
 {
     *board = (Board){ .mapHistory = board->mapHistory };
-    printf("mapHistory item count: %ld\n", board->mapHistory.count);
     board->mapHistory.count = 0;
 
     int result = LoadFen(board, FEN);

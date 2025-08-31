@@ -1,3 +1,4 @@
+#include <signal.h>
 #include <stdio.h>
 #include <time.h>
 #include <string.h>
@@ -5,7 +6,9 @@
 #include "./common/common.h"
 #include "../nob.h"
 
-#ifdef _WIN32
+bool keepRunning = true;
+
+#if defined(_WIN32)
     #include <sysinfoapi.h>
     void __stdcall __attribute__((dllimport)) Sleep(unsigned long msTimeout);
     BOOL WINAPI AllocConsole(void);
@@ -37,7 +40,7 @@ const double target = 1.0/60.0;;
 static double timer = 0.0f;
 
 PollFd polls[PLAYERS+1] = {0};
-bool pingResponses[PLAYERS];
+double pingTimer[PLAYERS];
 uint32_t pingData = 0;
 
 GameState gameState = NOGAME;
@@ -52,6 +55,11 @@ void HandlePlayerMessage(Server *server, int *disconnectedIndices, int *Pdisconn
 bool IsInsufficientMaterial(Server *server);
 bool IsRepetition(Server *server);
 int GetWinner(Server *server);
+
+void SignalHandler(int _)
+{
+    keepRunning = false;
+}
 
 void Broadcast(Server *server, Message *msg)
 {
@@ -75,29 +83,26 @@ void Send(Server *server, int client, Message *msg)
 void Ping(Server *server, int *disconnectedIndices, int *PdisconnectedCount)
 {
     static double lastTime = 0.0f;
-    static int pings = 0;
     double diff = timer - lastTime;
 
     int disconnectedCount = *PdisconnectedCount;
     if(diff >= 1.0f)
     {
-        lastTime = timer;
         for(int i = 0; i < server->playerCount; i++)
         {
-            if(pings == 0) break;
-            if(!pingResponses[i])
+            if(pingTimer[i] >= 30.0f)
             {
-                disconnectedIndices[disconnectedCount++] = i + 1;
+                disconnectedIndices[disconnectedCount++] = i+1;
             }
-            pingResponses[i] = false;
         }
+
+        lastTime = timer;
 
         pingData = rand();
         Message msg = { 0 };
         msg.flag = PING;
         msg.ping.data = pingData;
         Broadcast(server, &msg);
-        pings++;
     }
     *PdisconnectedCount = disconnectedCount;
 }
@@ -192,7 +197,7 @@ void HandlePlayerMessage(Server *server, int *disconnectedIndices, int *Pdisconn
             case PING: {
                 if(msg.ping.data == pingData)
                 {
-                    pingResponses[playerIndex] = true;
+                    pingTimer[playerIndex] = 0.0f;
                 }
             }; break;
             case REMATCH: {
@@ -284,7 +289,7 @@ void HandleDisconnect(Server *server, int *Pindex, int count)
     polls[playerIndexToReplace+1].sock       = server->clients[playerIndexToMove];
     server->clients[playerIndexToReplace]    = server->clients[playerIndexToMove];
     server->colour[playerIndexToReplace]     = server->colour[playerIndexToMove];
-    pingResponses[playerIndexToReplace]      = pingResponses[playerIndexToMove];
+    pingTimer[playerIndexToReplace]          = pingTimer[playerIndexToMove];
     server->rematch[playerIndexToReplace]    = server->rematch[playerIndexToMove];
     server->eliminated[playerIndexToReplace] = server->eliminated[playerIndexToMove];
     server->resigned[playerIndexToReplace]   = server->resigned[playerIndexToMove];
@@ -317,7 +322,7 @@ int AwaitPlayers(Server *server)
     if(!Listen(server->serverSock, 3)) return -1;
     polls[0] = (PollFd) { .sock = server->serverSock, .events = PollRead | PollUrgent, .revents = 0 };
 
-    int disconnectedIndices[3] = { 0 };
+    int disconnectedIndices[3];
     int disconnectedCount = 0;
 
     HandlePlayerMessage(server, &disconnectedIndices[0], &disconnectedCount);
@@ -329,7 +334,7 @@ int AwaitPlayers(Server *server)
 
     if((polls[0].revents & polls[0].events) != 0)
     {
-        pingResponses[server->playerCount] = true;
+        pingTimer[server->playerCount] = 0.0f;
         server->rematch[server->playerCount] = true;
         Socket *clientSock = Accept(server->serverSock);
         server->clients[server->playerCount++] = clientSock;
@@ -455,7 +460,7 @@ bool UpdateGame(Server *server, double deltaTime, struct EndOfGame *gameEnd)
         endReason = TIMEOUT;
     }
 
-    int disconnectedIndices[3] = { 0 };
+    int disconnectedIndices[3];
     int disconnectedCount = 0;
 
     HandlePlayerMessage(server, &disconnectedIndices[0], &disconnectedCount);
@@ -596,8 +601,13 @@ bool IsRepetition(Server *server)
 
 void CloseServer(Server *server)
 {
+    printf("closing server!\n");
+    Message msg = { 0 };
+    msg.flag = GOODBYE;
+
     for(int i = 0; i < server->playerCount; i++)
     {
+        Write(server->clients[i], &msg, sizeof(msg));
         Shutdown(server->clients[i]);
         Close(server->clients[i]);
     }
@@ -637,7 +647,11 @@ int main()
     #if defined(_WIN32)
         AllocConsole();
         freopen("CONOUT$", "w", stdout);
+    #elif defined(__GNUC__)
+        signal(SIGQUIT, SignalHandler);
     #endif
+    signal(SIGINT,  SignalHandler);
+    signal(SIGTERM, SignalHandler);
 
     srand(time(NULL));
     InitSockets();
@@ -649,7 +663,7 @@ int main()
     struct EndOfGame gameEnd = { 0 };
 
     double prevFrameStart = 0;
-    while(true)
+    while(keepRunning)
     {
         double start = GetTime();
         double deltaTime = start - prevFrameStart;
@@ -657,8 +671,13 @@ int main()
         prevFrameStart = start;
         timer += deltaTime;
 
-        int disconnectedIndices[3] = { 0 };
+        int disconnectedIndices[3];
         int disconnectedCount = 0;
+
+        for(int i = 0; i < server.playerCount; i++)
+        {
+            pingTimer[i] += deltaTime;
+        }
 
         if(gameState == NOGAME)
         {

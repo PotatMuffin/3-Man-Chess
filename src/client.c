@@ -175,6 +175,7 @@ enum GameState {
 enum GameState gameState  = NOGAME;
 enum EndFlag   endReason  = NONE;
 int            gameWinner = -1;
+double pingTimer   = 0.0f;
 double connectTime = 0.0f;
 bool drawOffered = false;
 
@@ -451,6 +452,7 @@ void UpdateGame(Board *board, double deltaTime)
         }
         else if(res == 1)
         {
+            pingTimer = 0.0f;
             connectTime = 0.0f;
             gameState = YESGAME;
             endReason  = NONE;
@@ -467,8 +469,9 @@ void UpdateGame(Board *board, double deltaTime)
     }
 
     if(sock == NULL) return;
+    pingTimer += deltaTime;
     int res = HandleServerMessage(board);
-    if(res != 0)
+    if(res != 0 || pingTimer >= 30.0f)
     {
         gameState = NOGAME;
         moveNotations.count = 0;
@@ -476,6 +479,7 @@ void UpdateGame(Board *board, double deltaTime)
         InitBoard(board, DEFAULT_FEN);
         Close(sock);
         sock = NULL;
+        return;
     }
 
     if(gameState == YESGAME)
@@ -942,87 +946,90 @@ int HandleServerMessage(Board *board)
     if(count == 0) return 0;
 
     int rc = Read(sock, &msg, sizeof(msg));
-    if(rc == 0) 
-    {
-        return 1;
-    }
+    if(rc == 0) return 0; 
 
-    if(msg.flag == GAMESTART)
+    switch(msg.flag)
     {
-        gameState = YESGAME;
-        drawOffered = false;
-        buttons[BUTTONDRAW].toggled = false;
-        buttons[BUTTONREMATCH].toggled = false;
-        printf("Starting game with fen:\n%s\nand colour: %d\n", msg.gameStart.FEN, msg.gameStart.colour);
-        assignedColour = msg.gameStart.colour;
-        perspective = (assignedColour >> 3) - 1;
-        InitBoard(board, msg.gameStart.FEN);
-        InitClock(board, msg.gameStart.timeControl);
-    }
-    else if(msg.flag == MOVEPLAYED)
-    {
-        drawOffered = false;
-        buttons[BUTTONDRAW].toggled = false;
-        SetClock(board, board->colourToMove, msg.movePlayed.clockTime);
-        Move move = msg.playMove.move;
-
-        GetMoveNotation(board, move, &moveNotations);
-
-        if(NextColourToPlay(board) == board->eliminatedColour)
-        {
-            GetMoveNotation(board, nullMove, &moveNotations);
-        }
-
-        ResetSquares();
-        PlayMoveAudio(board, move);
-        CreateAnimation(&_animation, board, move);
-        MakeMove(board, move);
-        lastMove = move;
-    }
-    else if(msg.flag == ELIMINATED)
-    {
-        uint8_t colour = msg.eliminated.colour;
-        SetClock(board, colour, msg.eliminated.clockTime);
-        EliminateColour(board, colour);
-        if(board->colourToMove == colour) 
-        {
-            GetMoveNotation(board, nullMove, &moveNotations);
-            NextMove(board);
-        }
-    }
-    else if(msg.flag == ENDOFGAME)
-    {
-        gameState = GAMEOVER;
-        endReason = msg.endOfGame.reason;
-        gameWinner = msg.endOfGame.winner;
-        lastMove = (Move){ 0 };
-        moveNotations.count = 0;
-
-        printf("game ended!\nreason: %d\nwinner: %d\n", msg.endOfGame.reason, msg.endOfGame.winner);
-    }
-    else if(msg.flag == PING)
-    {
-        Message response = { 0 };
-        response.flag = PING;
-        response.ping.data = msg.ping.data;
-        Write(sock, &response, sizeof(Message));
-    }
-    else if(msg.flag == GAMEINPROGRESS)
-    {
-        gameState = GAMEALREADYSTARTED;
-    }
-    else if(msg.flag == DRAW)
-    {
-        if(!msg.draw.agree) 
-        {
-            buttons[BUTTONDRAW].toggled = false;
+        case GAMESTART: {
+            gameState = YESGAME;
             drawOffered = false;
-        }
-        else 
-        {
-            drawOffered = true;
-        }
+            buttons[BUTTONDRAW].toggled = false;
+            buttons[BUTTONREMATCH].toggled = false;
+            printf("Starting game with fen:\n%s\nand colour: %d\n", msg.gameStart.FEN, msg.gameStart.colour);
+            assignedColour = msg.gameStart.colour;
+            perspective = (assignedColour >> 3) - 1;
+            InitBoard(board, msg.gameStart.FEN);
+            InitClock(board, msg.gameStart.timeControl);
+        }; break;
+
+        case MOVEPLAYED: {
+            drawOffered = false;
+            buttons[BUTTONDRAW].toggled = false;
+            SetClock(board, board->colourToMove, msg.movePlayed.clockTime);
+            Move move = msg.playMove.move;
+
+            GetMoveNotation(board, move, &moveNotations);
+
+            if(NextColourToPlay(board) == board->eliminatedColour)
+            {
+                GetMoveNotation(board, nullMove, &moveNotations);
+            }
+
+            ResetSquares();
+            PlayMoveAudio(board, move);
+            CreateAnimation(&_animation, board, move);
+            MakeMove(board, move);
+            lastMove = move;
+        }; break;
+
+        case ELIMINATED: {
+            uint8_t colour = msg.eliminated.colour;
+            SetClock(board, colour, msg.eliminated.clockTime);
+            EliminateColour(board, colour);
+            if(board->colourToMove == colour) 
+            {
+                GetMoveNotation(board, nullMove, &moveNotations);
+                NextMove(board);
+            }
+        }; break;
+
+        case ENDOFGAME: {
+            gameState = GAMEOVER;
+            endReason = msg.endOfGame.reason;
+            gameWinner = msg.endOfGame.winner;
+            lastMove = (Move){ 0 };
+            moveNotations.count = 0;
+
+            printf("game ended!\nreason: %d\nwinner: %d\n", msg.endOfGame.reason, msg.endOfGame.winner);
+        }; break;
+
+        case PING: {
+            pingTimer = 0.0f;
+            Message response = { 0 };
+            response.flag = PING;
+            response.ping.data = msg.ping.data;
+            Write(sock, &response, sizeof(Message));
+        }; break;
+
+        case GAMEINPROGRESS: {
+            gameState = GAMEALREADYSTARTED;
+        }; break;
+
+        case DRAW: {
+            if(!msg.draw.agree) 
+            {
+                buttons[BUTTONDRAW].toggled = false;
+                drawOffered = false;
+            }
+            else 
+            {
+                drawOffered = true;
+            }
+        }; break;
+
+        case GOODBYE: return 1;
     }
+
     return 0;
 }
 

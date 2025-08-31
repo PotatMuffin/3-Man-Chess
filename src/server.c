@@ -3,10 +3,11 @@
 #include <string.h>
 #include <stdlib.h>
 #include "./common/common.h"
+#include "../nob.h"
 
 #ifdef _WIN32
     #include <sysinfoapi.h>
-    void __stdcall Sleep(unsigned long msTimeout);
+    void __stdcall __attribute__((dllimport)) Sleep(unsigned long msTimeout);
     BOOL WINAPI AllocConsole(void);
 #endif
 
@@ -49,6 +50,7 @@ int AwaitPlayers(Server *server);
 void CloseServer(Server *server);
 void HandlePlayerMessage(Server *server, int *disconnectedIndices, int *PdisconnectedCount);
 bool IsInsufficientMaterial(Server *server);
+bool IsRepetition(Server *server);
 int GetWinner(Server *server);
 
 void Broadcast(Server *server, Message *msg)
@@ -411,6 +413,16 @@ bool UpdateGame(Server *server, double deltaTime, struct EndOfGame *gameEnd)
             endReason = FIFTYRULE;
             isDraw = true;
         }
+        else if(IsRepetition(server))
+        {
+            endReason = REPETITION;
+            isDraw = true;
+        }
+        else if(IsInsufficientMaterial(server))
+        {
+            endReason = INSUFFMAT;
+            isDraw    = true;
+        }
 
         GenerateMoves(&server->board, &legalMoves);
         if(legalMoves.count == 0)
@@ -433,11 +445,6 @@ bool UpdateGame(Server *server, double deltaTime, struct EndOfGame *gameEnd)
                     isDraw = true;
                 }
             }
-        }
-        else if(IsInsufficientMaterial(server))
-        {
-            endReason = INSUFFMAT;
-            isDraw    = true;
         }
     }
 
@@ -565,6 +572,26 @@ bool IsInsufficientMaterial(Server *server)
         }
     }
     return true;
+}
+
+bool IsRepetition(Server *server)
+{
+    Board *board = &server->board;
+    int duplicateCount = 0;
+
+    for(int i = 0; i < board->mapHistory.count; i++)
+    {
+        bool isEqual = true;
+        for(int j = 0; j < NOB_ARRAY_LEN(board->map); j++)
+        {
+            BoardMap *map = &board->mapHistory.items[i];
+            isEqual = isEqual && (board->map[j] == (*map)[j]);
+            if(!isEqual) break;
+        }
+        if(isEqual) duplicateCount++;
+    }
+
+    return duplicateCount >= 3;
 }
 
 void CloseServer(Server *server)

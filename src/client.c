@@ -191,7 +191,6 @@ int selectedSquare = -1;
 enum Highlight highlightedSquares[144];
 
 MoveList moveList = {0};
-MoveList playedMoves = {0};
 Move lastMove = nullMove;
 MoveNotations moveNotations;
 
@@ -229,7 +228,7 @@ void DrawClock(Board *board);
 void DrawBoard(Board *board);
 void DrawEndScreen();
 void DrawButton(enum Button buttonIndex);
-void DrawMoveList(MoveList *moveList);
+void DrawMoveList();
 void DrawDrawUI();
 void UpdateAnimation(Animation *animation, double deltaTime);
 
@@ -331,7 +330,7 @@ int main()
         if(gameState == YESGAME)
         {
             DrawClock(&board);
-            DrawMoveList(&playedMoves);
+            DrawMoveList();
             DrawButton(BUTTONRESIGN);
             DrawButton(BUTTONDRAW);
 
@@ -590,7 +589,6 @@ void UpdateButtons(Board *board)
                 buttons[i].toggled = !buttons[i].toggled;
                 msg.flag = REMATCH;
                 msg.rematch.agree = buttons[i].toggled;
-                Write(sock, &msg, sizeof(msg));
             }; break;
             case BUTTONEXIT: {
                 gameState = NOGAME;
@@ -603,28 +601,29 @@ void UpdateButtons(Board *board)
             }; break;
             case BUTTONRESIGN: {
                 msg.flag = RESIGN;
-                Write(sock, &msg, sizeof(msg));
             }; break;
             case BUTTONACCEPTDRAW: {
                 buttons[BUTTONDRAW].toggled = true;
                 drawOffered = false;
-                goto sendDrawResponse;
+                msg.flag = DRAW;
+                msg.draw.agree = true;
             }; break;
             case BUTTONDECLINEDRAW: {
                 buttons[BUTTONDRAW].toggled = false;
                 drawOffered = false;
-                goto sendDrawResponse;
+                msg.flag = DRAW;
+                msg.draw.agree = false;
             }; break;
             case BUTTONDRAW: {
                 buttons[i].toggled = !buttons[i].toggled;
 
                 sendDrawResponse:
-                msg.draw.agree = buttons[BUTTONDRAW].toggled;
+                msg.draw.agree = buttons[i].toggled;
                 msg.flag = DRAW;
-                Write(sock, &msg, sizeof(msg));
-                break;
             }; break;
         }
+
+        if(sock) Write(sock, &msg, sizeof(msg));
         break;
     }
 }
@@ -847,7 +846,7 @@ void DrawEndScreen()
     DrawButton(BUTTONEXIT);
 }
 
-void DrawMoveList(MoveList *moveList)
+void DrawMoveList()
 {
     static const int third = (MoveListWindow.width - 20) / 3;
     static const float fontSize = 20.0f;
@@ -967,7 +966,6 @@ int HandleServerMessage(Board *board)
         SetClock(board, board->colourToMove, msg.movePlayed.clockTime);
         Move move = msg.playMove.move;
 
-        AddMove(&playedMoves, move);
         GetMoveNotation(board, move, &moveNotations);
 
         if(NextColourToPlay(board) == board->eliminatedColour)

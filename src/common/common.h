@@ -49,8 +49,17 @@ typedef struct {
     int increment;
 } TimeControl;
 
+typedef uint8_t BoardMap[144];
+
 typedef struct {
-    uint8_t map[144];
+    BoardMap *items;
+    size_t count;
+    size_t capacity;
+} BoardMapHistory;
+
+typedef struct {
+    BoardMap map;
+    BoardMapHistory mapHistory;
     PieceList piecelists[24];
     CastleRights castleRights[3];
     uint8_t enPassantSquares[3];

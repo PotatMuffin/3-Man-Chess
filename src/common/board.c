@@ -1,10 +1,24 @@
 #include "./common.h"
+#include "../../nob.h"
+
+#define mapHistoryAppend(da, item)                    \
+    do {                                              \
+        nob_da_reserve((da), (da)->count + 1);        \
+        for(int i = 0; i < NOB_ARRAY_LEN(item); i++)  \
+        {                                             \
+            (da)->items[(da)->count][i] = item[i];    \
+        }                                             \
+        (da)->count++;                                \
+    } while (0)
 
 bool IsBackRankVacated(Board *board, uint8_t section);
 
 int InitBoard(Board *board, char *FEN)
 {
-    *board = (Board){0};
+    *board = (Board){ .mapHistory = board->mapHistory };
+    printf("mapHistory item count: %ld\n", board->mapHistory.count);
+    board->mapHistory.count = 0;
+
     int result = LoadFen(board, FEN);
     if(result != 0) return 1;
 
@@ -141,10 +155,15 @@ void MakeMove(Board *board, Move move)
     }
 
     board->moveCount++;
-    board->fiftyMoveClock++;
     if(capturedPiece != NONE || pieceType == PAWN || pieceType == PAWNCC)
     {
         board->fiftyMoveClock = 0;
+        board->mapHistory.count = 0;
+    }
+    else 
+    {
+        board->fiftyMoveClock++;
+        mapHistoryAppend(&board->mapHistory, board->map);
     }
 
     NextMove(board);
